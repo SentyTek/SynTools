@@ -42,8 +42,8 @@ int main(int argc, char** argv) {
             SynTools::ShaderCompiler::PrintHelp();
             return 1;
         }
-        std::string vertexPath   = argv[2];
-        std::string fragmentPath = argv[3];
+        std::string fragmentPath = argv[2];
+        std::string vertexPath   = argv[3];
         std::string outputPath   = argv[4];
         std::vector<std::string> options;
         for (int i = 5; i < argc; ++i) {

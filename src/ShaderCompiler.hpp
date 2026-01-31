@@ -16,7 +16,7 @@ class ShaderCompiler {
   public:
     static bool CompileShader(std::string                     fragmentPath,
                               std::string                     vertexPath,
-                              const std::string&              outputPath,
+                              std::string                     outputPath,
                               const std::vector<std::string>& options = {});
 
     static void PrintHelp();
