@@ -103,15 +103,18 @@ void ShaderCompiler::PrintHelp() {
     std::cout << "Usage: ShaderCompiler <fragment_shader> <vertex_shader> "
                  "<output_path> [options]\n\n";
     std::cout << "Options:\n";
-    std::cout << "  --compiler=<path>     Path to shader compiler executable "
+    std::cout << "  --compiler=<path>     Path to shader compiler executable, "
+                 "relative to program"
                  "(default: shaderc)\n";
     //std::cout << "  --platform=<platform> Target platform (default: dx12 on win32, metal on macOS, spirv on others)\n";
     std::cout << "  --varying=<path>      Path to varying definitions file\n";
     std::cout << "  --src-ext=<ext>       Source file extension (default: .sc)\n";
     std::cout
-        << "  --out-ext=<ext>       Output file extension (default: .sc.bin)\n";
-    std::cout << "  --src-dir=<dir>       Source directory for shaders\n";
-    std::cout << "  --include=<dir>       Additional include directory "
+        << "  --out-ext=<ext>       Output file extension (default: .bin)\n";
+    std::cout << "  --src-dir=<dir>       Source directory for shaders, "
+                 "relative to program.\n";
+    std::cout << "  --include=<dir>       Additional include directory, "
+                 "relative to program "
                  "(Multiple allowed)\n";
     std::cout << "\nExamples:\n";
     std::cout << "syntools shader space s s\n";
@@ -119,10 +122,19 @@ void ShaderCompiler::PrintHelp() {
         << "\tCompiles 'space.vert.sc' and 'space.frag.sc' from the default "
            "shader directory (root/assets/shaders) into respective bin "
            "files.\n";
-    std::cout << "syntools shader screen s screen_output --out-ext=.shader --src-ext=.shadercode\n";
+    std::cout << "syntools shader screen s screen_output --out-ext=.shader "
+                 "--src-ext=.shadercode\n";
     std::cout
         << "\tCompiles 'screen.vert.shadercode' and 'screen.frag.shadercode' "
            "into 'screen_output.vert.shader' and "
            "'screen_output.frag.shader'.\n";
+    std::cout << "syntools shader lighting lighting_vert lighting_out "
+                 "--compiler=./tools/shaderc --src-dir=./my_shaders/ "
+                 "--varying=lighting_varying\n";
+    std::cout << "\tCompiles 'lighting_vert.vert.sc' and "
+                 "'lighting.frag.sc' from './my_shaders/' using the varying "
+                 "definitions in './my_shaders/varying/lighting_varying.sc'.\n";
+    
 }
+
 } // namespace SynTools
