@@ -1,0 +1,11 @@
+config/
+build/
+.vscode/
+.xcode/
+*.xcodeproj
+*.xcworkspace
+.DS_Store
+.cache
+.clangd
+cmake_install.cmake
+CMakeScripts
