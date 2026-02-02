@@ -37,8 +37,8 @@ int main(int argc, char** argv) {
     }
 
     std::string command = argv[1];
-    if (command == "shader") {
-        if (argc < 5) {
+    if (command == "shader" || command == "shaders") {
+        if (argc < 5 || std::string(argv[2]) == "--help" || std::string(argv[2]) == "-h") {
             SynTools::ShaderCompiler::PrintHelp();
             return 1;
         }

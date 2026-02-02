@@ -20,13 +20,16 @@ bool ShaderCompiler::CompileShader(std::string                     fragmentPath,
     // Decode options and set up compilation parameters
 #ifdef _WIN32
     std::string compilerPath = "shaderc.exe"; // Default shader compiler path
-    std::string platform     = "s_5_0"; // DX 12 is HLSL 5
+    std::string profile      = "s_5_0";       // DX 12 is HLSL 5
+    std::string platform     = "windows";
 #else
     std::string compilerPath = "./shaderc"; // Default shader compiler path
 #ifdef __APPLE__
-    std::string platform = "metal";
+    std::string profile = "metal";
+    std::string platform = "osx";
 #else
-    std::string platform = "spirv";
+    std::string profile = "spirv";
+    std::string platform = "linux";
 #endif
 #endif
     std::string srcDir = "../../assets/shaders/";
@@ -74,9 +77,9 @@ bool ShaderCompiler::CompileShader(std::string                     fragmentPath,
     // Compile vertex shader
     std::string vertCommand =
         compilerPath + " -f " + srcDir + vertexPath + ".vert" + srcExtension +
-        " -o " + outputPath + ".vert" + outExtension + " -p " + platform +
-        " --type v" + " --varyingdef " + srcDir + "varying/" + varying +
-        srcExtension + " " + includes;
+        " -o " + outputPath + ".vert" + outExtension + " -p " + profile +
+        " --platform " + platform + " --type v" + " --varyingdef " + srcDir +
+        "varying/" + varying + srcExtension + " " + includes;
 
     std::cout << "Compiling vertex shader with command: " << vertCommand << std::endl;
     int vertResult = std::system(vertCommand.c_str());
@@ -85,11 +88,12 @@ bool ShaderCompiler::CompileShader(std::string                     fragmentPath,
     }
 
     // Compile fragment shader
+    // https://bkaradzic.github.io/bgfx/tools.html
     std::string fragCommand =
         compilerPath + " -f " + srcDir + fragmentPath + ".frag" + srcExtension +
-        " -o " + outputPath + ".frag" + outExtension + " -p " + platform +
-        " --type f" + " --varyingdef " + srcDir + "varying/" + varying +
-        srcExtension + " " + includes;
+        " -o " + outputPath + ".frag" + outExtension + " -p " + profile +
+        " --platform " + platform + " --type f" + " --varyingdef " + srcDir +
+        "varying/" + varying + srcExtension + " " + includes;
     
     std::cout << "Compiling fragment shader with command: " << fragCommand << std::endl;
     int fragResult = std::system(fragCommand.c_str());
@@ -101,8 +105,8 @@ bool ShaderCompiler::CompileShader(std::string                     fragmentPath,
 }
 
 void ShaderCompiler::PrintHelp() {
-    std::cout << "ShaderCompiler - Compile shaders for Syngine\n";
-    std::cout << "Usage: ShaderCompiler <fragment_shader> <vertex_shader> "
+    std::cout << "Shader Compiler - Compile shaders for Syngine :D\n";
+    std::cout << "Usage: syntools shader <fragment_shader> <vertex_shader> "
                  "<output_path> [options]\n\n";
     std::cout << "Options:\n";
     std::cout << "  --compiler=<path>     Path to shader compiler executable, "
