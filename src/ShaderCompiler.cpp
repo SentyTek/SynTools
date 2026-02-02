@@ -19,7 +19,7 @@ bool ShaderCompiler::CompileShader(std::string                     fragmentPath,
                                    const std::vector<std::string>& options) {
     // Decode options and set up compilation parameters
 #ifdef _WIN32
-    std::string compilerPath = "shaderc"; // Default shader compiler path
+    std::string compilerPath = "shaderc.exe"; // Default shader compiler path
     std::string platform     = "s_5_0"; // DX 12 is HLSL 5
 #else
     std::string compilerPath = "./shaderc"; // Default shader compiler path
@@ -50,6 +50,8 @@ bool ShaderCompiler::CompileShader(std::string                     fragmentPath,
             srcDir = option.substr(10);
         } else if (option.rfind("--include=", 0) == 0) {
             includes += " -i " + option.substr(10);
+        } else if (option.rfind("--vulkan", 0) == 0) {
+            platform = "spirv";
         }
     }
 
