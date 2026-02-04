@@ -18,7 +18,8 @@ void printHelp() {
     std::cout << "Usage: syngine_tools <command> [options]\n\n";
     std::cout << "Commands:\n";
     std::cout << "  shader       Compile shaders\n";
-    std::cout << "  package      Package game assets\n";
+    std::cout << "  pack         Compress & package game files\n";
+    std::cout << "  validate     Validate a packaged asset bundle\n";
     std::cout << "\nOptions:\n";
     std::cout << "  --help, -h        Show this help message\n";
     std::cout << "  --version, -v     Show tool version\n";
@@ -40,7 +41,7 @@ int main(int argc, char** argv) {
     if (command == "shader" || command == "shaders") {
         if (argc < 5 || std::string(argv[2]) == "--help" || std::string(argv[2]) == "-h") {
             SynTools::ShaderCompiler::PrintHelp();
-            return 1;
+            return 0;
         }
         std::string fragmentPath = argv[2];
         std::string vertexPath   = argv[3];
@@ -55,6 +56,41 @@ int main(int argc, char** argv) {
             return 1;
         }
         std::cout << "Shader compiled successfully." << std::endl;
+    } else if (command == "pack" || command == "package" || command == "packager") {
+        if (argc < 3 || std::string(argv[2]) == "--help" || std::string(argv[2]) == "-h") {
+            SynTools::AssetPackager packager;
+            packager.PrintHelp();
+            return 0;
+        }
+        std::string outputPath = argv[2];
+        std::vector<std::string> files;
+        std::vector<std::string> options;
+        for (int i = 3; i < argc; ++i) {
+            // If option
+            if (std::string(argv[i]).rfind("-", 0) == 0) {
+                options.push_back(argv[i]);
+                continue;
+            }
+            files.push_back(argv[i]);
+        }
+        SynTools::AssetPackager packager;
+        bool success = packager.CreateFileBundle(files, outputPath, std::string(argv[0]), options);
+        if (!success) {
+            std::cerr << "Asset packaging failed." << std::endl;
+            return 1;
+        }
+        std::cout << "Asset(s) packaged successfully." << std::endl;
+    } else if (command == "validate") {
+        if (argc < 3 || std::string(argv[2]) == "--help" || std::string(argv[2]) == "-h") {
+            std::cout << "Usage: syngine_tools validate <package_path>\n";
+            return 0;
+        }
+        std::string packagePath = argv[2];
+        SynTools::AssetPackager packager;
+        packager.ValidatePackage(packagePath);
+    } else {
+        printHelp();
+        return 1;
     }
     
     return 0;

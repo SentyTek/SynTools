@@ -106,7 +106,7 @@ bool ShaderCompiler::CompileShader(std::string                     fragmentPath,
 
 void ShaderCompiler::PrintHelp() {
     std::cout << "Shader Compiler - Compile shaders for Syngine :D\n";
-    std::cout << "Usage: syntools shader <fragment_shader> <vertex_shader> "
+    std::cout << "Usage: syntools shader <fragment_name> <vertex_name> "
                  "<output_path> [options]\n\n";
     std::cout << "Options:\n";
     std::cout << "  --compiler=<path>     Path to shader compiler executable, "
