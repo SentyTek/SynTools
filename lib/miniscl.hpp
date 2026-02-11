@@ -26,9 +26,9 @@
 #  undef min
 #endif
 
-#define SCL_MAX_REFS 4096
+
 #ifndef SCL_STREAM_BUF
-#  define SCL_STREAM_BUF 8192
+#  define SCL_STREAM_BUF 0x8000
 #endif
 
 /**
@@ -46,92 +46,31 @@ uchar                 log2i(unsigned x);
  *
  */
 namespace internal {
-class RefObj {
- private:
-  int  m_refi = 0;
-
-  bool findslot();
-  void incslot() const;
-  bool decslot();
-
- public:
-  RefObj();
-  RefObj(const RefObj&);
-  virtual ~RefObj() = 0;
-
- protected:
-  /**
-   * @brief Deep copy implemented by derived classes, called by RefObj.
-   * @note The `free` param can be ignored by most implementations, unless they
-   * use unmanaged memory (example: an scl::string object viewing a string
-   * buffer).
-   *
-   * @param free Whether or not this object is managed, and its resources
-   * should be freed during the copy.
-   */
-  virtual void mutate(bool free) = 0;
-
-  /**
-   * @brief Decrements the number of references for this object.
-   *
-   * @return <b>true</b> if no references remain.
-   * @return <b>false</b> if otherwise.
-   */
-  bool         deref();
-
-  /**
-   * @brief Makes this object unique.
-   * @note Calles the derived class' implmentation of
-   * RefObj::mutate() if applicable.
-   *
-   * @param copy Whether or not this object should be deep copied if it
-   * is not unique already.
-   * @return <b>true</b> if this object was not unique before.
-   * @return <b>false</b> if otherwise.
-   */
-  bool         make_unique(bool copy = true);
-
-  /**
-   * @brief Makes this object reference another. Behaves identically to the
-   * RefObj copy constructor.
-   * @note This does not handle any managed memory of the derived class, which
-   * must be handled manually before using this method.
-   */
-  void         ref(const RefObj&);
-
-  bool         operator==(const RefObj& rhs) const;
-
- public:
-  /**
-   * @brief Returns the number of references of this object.
-   *
-   * @return <b>int</b> Number of references. Returns 0 if this object has no
-   * references.
-   */
-  int refs() const;
-};
-
 class str_iterator;
 } // namespace internal
 
-class string : public internal::RefObj {
+class string {
  private:
   friend class internal::str_iterator;
 
+  // If m_buf is a view, m_sz will be 0, while m_buf will be non-zero.
+  // In this case, m_ln will also represent m_sz.
   char*    m_buf = nullptr;
-  unsigned m_ln  = 0;
-  unsigned m_sz  = 0;
+  uint32_t m_ln  = 0;
+  uint32_t m_sz  = 0;
 
-  void     mutate(bool free) override;
+  bool     isview() const;
+  void     make_unique();
 
  public:
   string();
+  string(const std::string&);
   string(const char*);
 #ifdef _WIN32
   string(const wchar_t*);
 #endif
   string(const scl::string&);
-  ~string() override;
+  ~string();
 
   /**
    * @brief Clears this strings memory.
@@ -272,6 +211,17 @@ class string : public internal::RefObj {
   scl::string&     replace(const scl::string& pattern, const scl::string& with);
 
   /**
+   * @brief Replace the substring starting at i, and j bytes long with the
+   * paramater `with`.
+   *
+   * @param  with  string to place.
+   * @param  i  start index.
+   * @param  j  length. Default -1 (until end of string).
+   * @return Reference to this object.
+   */
+  scl::string&     replace(const scl::string& with, int i, int j = -1);
+
+  /**
    * @brief Replaces all lowercase ascii characters with their uppercase
    * counterparts.
    */
@@ -394,27 +344,29 @@ class string : public internal::RefObj {
   friend std::ifstream& operator>>(std::ifstream& in, scl::string& str);
 };
 
-scl::string operator+(const scl::string& str, const char* str2);
+std::ostream& operator<<(std::ostream& out, const scl::string& str);
+
+scl::string   operator+(const scl::string& str, const char* str2);
 
 /**
  * @brief Resets the output of scl::clock(), making current time epoch.
  *
  */
-void        resetclock();
+void          resetclock();
 
 /**
  * @note You can use scl::resetclock() to control this function's epoch.
  *
  * @return   Seconds since epoch.
  */
-double      clock();
+double        clock();
 
 /**
  * @brief Makes this thread sleep for a given amount of milliseconds.
  *
  * @param sleemms  Number of milliseconds to sleep for.
  */
-void        waitms(double ms);
+void          waitms(double ms);
 
 /**
  * @brief  Waits until the given lamda function returns true.
@@ -425,8 +377,8 @@ void        waitms(double ms);
  * checks. By default 0.001ms.
  * @return  true: Wait did not time out, false: Wait did time out.
  */
-bool        waitUntil(std::function<bool()> cond, double timeout = -1,
-         double sleepms = 0.001);
+bool          waitUntil(std::function<bool()> cond, double timeout = -1,
+           double sleepms = 0.001);
 
 enum class StreamPos {
   start   = SEEK_SET,
@@ -464,6 +416,7 @@ class stream {
 
   long long read_internal(void* buf, size_t n);
   bool      write_internal(const void* buf, size_t n, size_t align);
+  void      close_internal();
 
  public:
   stream()                  = default;
@@ -489,6 +442,12 @@ class stream {
    * @return  Offset in bytes of the rw pointer.
    */
   long long    tell() const;
+
+  /**
+   * @brief Returns the current capacity of the stream.
+   * Only works in data mode, returns 0 in file mode.
+   */
+  size_t       size() const;
 
   /**
    * @brief  Resets the modified status of this stream to false.
@@ -568,7 +527,7 @@ class stream {
    * bytes were written.
    */
   virtual bool      write(const void* buf, size_t n, size_t align = 1,
-         bool flush = true);
+         bool flush = false);
 
   /**
    * @brief  Writes an scl::string's length to this stream.
@@ -581,7 +540,7 @@ class stream {
    * @return  true if the operation was successful, and the requested number of
    * bytes were written.
    */
-  bool write(const scl::string& str, size_t align = 1, bool flush = true);
+  bool write(const scl::string& str, size_t align = 1, bool flush = false);
 
   /**
    * @brief  Writes another scl::string into this stream.
@@ -645,16 +604,15 @@ class str_iterator {
 } // namespace internal
 
 /**
- * @brief Initializes SCL global resources. Libraries currently requiring this
- * is scl::pack.
+ * @brief Initializes SCL global resources.
  *
  * @return  Returns true on success, false on otherwise.
  */
 bool init();
 
 /**
- * @brief Releases SCL global resources. Libraries currently requiring this
- * is scl::pack.
+ * @brief Releases SCL global resources.
+ * Currently does nothing. But remains for compatibility.
  *
  */
 void terminate();
@@ -683,14 +641,14 @@ struct hnode {
   hnode*   m_next;
   K        m_key;
   T        m_data;
-  unsigned m_hash;
+  uint32_t m_hash;
 };
 template <class T, class K, bool NC = true>
 class htab_iterator;
 } // namespace internal
 
 template <class T, class K = string, class Hfunc = string>
-class dictionary : internal::RefObj {
+class dictionary {
   friend class internal::htab_iterator<T, K>;
   friend class internal::htab_iterator<T, K, false>;
 
@@ -699,11 +657,11 @@ class dictionary : internal::RefObj {
   using htab_iterator       = internal::htab_iterator<T, K, true>;
   using const_htab_iterator = internal::htab_iterator<T, K, false>;
 
-  uchar           m_hsz;
-  unsigned        m_hnum;
-  hnode**         m_ht;
+  hnode**         m_ht      = nullptr;
+  uint32_t        m_hnum    = 0;
+  uint8_t         m_hsz     = 0;
 
-  static unsigned ghash(const K& key) {
+  static uint32_t ghash(const K& key) {
     return Hfunc::hash(key);
   }
 
@@ -713,21 +671,21 @@ class dictionary : internal::RefObj {
     return !strained && !big && m_hsz >= SCL_DICT_MIN;
   }
 
-  uchar optimal() const {
+  uint8_t optimal() const {
     return std::max(log2i(m_hnum) + 2, SCL_DICT_MIN);
   }
 
-  unsigned nodei(unsigned hash) const {
+  uint32_t nodei(uint32_t hash) const {
     return hash % (1 << m_hsz);
   }
 
-  hnode* gnodebase(unsigned hash) const {
+  hnode* gnodebase(uint32_t hash) const {
     if(!m_ht || !hash)
       return nullptr;
     return m_ht[nodei(hash)];
   }
 
-  hnode* gnodefull(unsigned hash) const {
+  hnode* gnodefull(uint32_t hash) const {
     hnode* n = gnodebase(hash);
     while(n && n->m_hash != hash && n->m_next)
       n = n->m_next;
@@ -737,7 +695,7 @@ class dictionary : internal::RefObj {
   }
 
   hnode* first() const {
-    for(unsigned i = 0; i < 1u << m_hsz && m_ht; i++) {
+    for(uint32_t i = 0; i < 1u << m_hsz && m_ht; i++) {
       if(m_ht[i]) {
         return m_ht[i];
       }
@@ -752,28 +710,16 @@ class dictionary : internal::RefObj {
     if(node->m_next)
       return node->m_next;
     // Continue on from the next node in the htab array
-    for(unsigned i = nodei(node->m_hash) + 1; i < 1u << m_hsz; i++)
+    for(uint32_t i = nodei(node->m_hash) + 1; i < 1u << m_hsz; i++)
       if(m_ht[i])
         return m_ht[i];
     // No next node could be found
     return nullptr;
   }
 
-  void mutate(bool free) override {
-    dictionary fun;
-    for(hnode* n = nodenext(nullptr); n;) {
-      fun.set(n->m_key, n->m_data);
-      n = nodenext(n);
-    }
-    if(free)
-      _clear();
-    *this = fun;
-  }
-
   void put(hnode* node) {
     node->m_next = nullptr;
-    make_unique();
-    hnode* n = gnodebase(node->m_hash);
+    hnode* n     = gnodebase(node->m_hash);
     while(n && n->m_next && n->m_hash != node->m_hash)
       n = n->m_next;
     m_hnum++;
@@ -790,8 +736,8 @@ class dictionary : internal::RefObj {
       n->m_next = node;
   }
 
-  void rehash(hnode** oh, unsigned ohsz) {
-    for(unsigned i = 0; i < ((unsigned)1 << ohsz); i++) {
+  void rehash(hnode** oh, uint32_t ohsz) {
+    for(uint32_t i = 0; i < ((uint32_t)1 << ohsz); i++) {
       hnode* n = oh[i];
       for(; n;) {
         hnode* m_next = n->m_next;
@@ -803,17 +749,17 @@ class dictionary : internal::RefObj {
   }
 
   void optimize() {
-    hnode**       oh   = m_ht;
-    unsigned char ohsz = m_hsz;
-    m_hsz              = optimal();
-    unsigned s         = (1 << m_hsz);
-    m_ht               = new hnode*[s];
+    hnode** oh   = m_ht;
+    uint8_t ohsz = m_hsz;
+    m_hsz        = optimal();
+    uint32_t s   = (1 << m_hsz);
+    m_ht         = new hnode*[s];
     if(!m_ht)
       throw "out of memory";
     memset(m_ht, 0, sizeof(hnode*) * s);
     m_hnum = 0;
     if(oh)
-      rehash(oh, ohsz), free((void*)oh);
+      rehash(oh, ohsz), delete[] oh;
   }
 
   void _clear() {
@@ -833,29 +779,34 @@ class dictionary : internal::RefObj {
   }
 
  public:
-  dictionary() {
-    m_hsz  = 0;
-    m_hnum = 0;
-    m_ht   = nullptr;
+  dictionary() = default;
+
+  template <class X                                           = T,
+    std::enable_if_t<std::is_copy_assignable<X>::value, bool> = true>
+  dictionary(const dictionary& rhs) {
+    if(rhs.m_ht) {
+      for(hnode* node = rhs.first(); node;) {
+        set(node->m_key, node->m_data);
+        node = rhs.nodenext(node);
+      }
+    }
   }
 
-  dictionary(const dictionary& rhs)
-      : RefObj(rhs), m_ht(rhs.m_ht), m_hnum(rhs.m_hnum), m_hsz(rhs.m_hsz) {
-  }
-
+  template <class X                                           = T,
+    std::enable_if_t<std::is_copy_assignable<X>::value, bool> = true>
   dictionary& operator=(const dictionary& rhs) {
-    if(this->internal::RefObj::operator==(rhs))
-      return *this;
     clear();
-    ref(rhs);
-    m_hnum = rhs.m_hnum;
-    m_hsz  = rhs.m_hsz;
-    m_ht   = rhs.m_ht;
+    if(rhs.m_ht) {
+      for(hnode* node = rhs.first(); node;) {
+        set(node->m_key, node->m_data);
+        node = rhs.nodenext(node);
+      }
+    }
     return *this;
   }
 
-  ~dictionary() override {
-    if(deref() && m_ht)
+  ~dictionary() {
+    if(m_ht)
       _clear();
   }
 
@@ -864,7 +815,6 @@ class dictionary : internal::RefObj {
    *
    */
   void clear() {
-    make_unique(false);
     _clear();
   }
 
@@ -891,8 +841,6 @@ class dictionary : internal::RefObj {
   template <class X                                           = T,
     std::enable_if_t<std::is_copy_assignable<X>::value, bool> = true>
   void set(const K& key, const T& v) {
-    // Make this unique
-    make_unique();
     if(!isoptimal())
       optimize();
     hnode* node = new hnode();
@@ -915,8 +863,6 @@ class dictionary : internal::RefObj {
                                             std::is_move_assignable<X>::value,
                            bool> = true>
   void set(const K& key, T& v) {
-    // Make this unique
-    make_unique();
     if(!isoptimal())
       optimize();
     hnode* node = new hnode();
@@ -936,7 +882,7 @@ class dictionary : internal::RefObj {
    * @param key  Key of the element to remove.
    */
   void remove(const K& key) {
-    unsigned hash = ghash(key);
+    uint32_t hash = ghash(key);
     hnode *  prev = nullptr, *n = gnodebase(hash);
     while(n && n->m_next && n->m_hash != hash) {
       prev = n;
@@ -964,6 +910,14 @@ class dictionary : internal::RefObj {
       return htab_iterator(*this, 0);
   }
 
+  const_htab_iterator begin() const {
+    auto* n = first();
+    if(n)
+      return const_htab_iterator(*this, n->m_hash, n->m_key);
+    else
+      return const_htab_iterator(*this, 0);
+  }
+
   const_htab_iterator cbegin() const {
     auto* n = first();
     if(n)
@@ -974,6 +928,10 @@ class dictionary : internal::RefObj {
 
   htab_iterator end() {
     return htab_iterator(*this, 0);
+  }
+
+  const_htab_iterator end() const {
+    return const_htab_iterator(*this, 0);
   }
 
   const_htab_iterator cend() const {
@@ -988,7 +946,7 @@ class dictionary : internal::RefObj {
    * to dictionary::end() if no such element exists.
    */
   htab_iterator get(const K& key) {
-    unsigned hash = ghash(key);
+    uint32_t hash = ghash(key);
     hnode*   n    = gnodefull(hash);
     if(n)
       return htab_iterator(*this, n->m_hash, key);
@@ -1003,7 +961,7 @@ class dictionary : internal::RefObj {
    * to dictionary::end() if no such element exists.
    */
   const_htab_iterator get(const K& key) const {
-    unsigned hash = ghash(key);
+    uint32_t hash = ghash(key);
     hnode*   n    = gnodefull(hash);
     if(n)
       return const_htab_iterator(*this, n->m_hash, key);
@@ -1058,16 +1016,16 @@ template <class T, class K, bool NC>
 class htab_iterator {
   dictionary<T, K>* m_dict = nullptr;
   K                 m_ikey;
-  unsigned          m_hash = 0;
+  uint32_t          m_hash = 0;
 
  public:
   htab_iterator() = default;
 
-  htab_iterator(const dictionary<T, K>& dict, unsigned hash)
+  htab_iterator(const dictionary<T, K>& dict, uint32_t hash)
       : m_dict((dictionary<T, K>*)&dict), m_hash(hash) {
   }
 
-  htab_iterator(const dictionary<T, K>& dict, unsigned hash, const K& key)
+  htab_iterator(const dictionary<T, K>& dict, uint32_t hash, const K& key)
       : m_dict((dictionary<T, K>*)&dict), m_hash(hash), m_ikey(key) {
   }
 
@@ -1139,7 +1097,6 @@ class htab_iterator {
   htab_iterator& operator=(const T& val) {
     if(!m_dict)
       throw std::out_of_range("");
-    m_dict->make_unique();
     m_hash     = *this == m_dict->end() ? m_dict->ghash(m_ikey) : m_hash;
     auto* node = m_dict->gnodefull(m_hash);
     if(!node)
@@ -1156,7 +1113,6 @@ class htab_iterator {
   htab_iterator& operator=(T&& val) {
     if(!m_dict)
       throw std::out_of_range("");
-    m_dict->make_unique();
     m_hash     = *this == m_dict->end() ? m_dict->ghash(m_ikey) : m_hash;
     auto* node = m_dict->gnodefull(m_hash);
     if(!node)
@@ -1570,7 +1526,7 @@ enum XmlFlags {
   // Collection of flags that optimize for speed, at the cost of disabling
   // validation.
   // Using this flag will obfuscate most error messages.
-  speed_optimze = no_syntax | no_tag_check,
+  speed_optimize = no_syntax | no_tag_check,
 };
 
 enum {
@@ -1603,10 +1559,9 @@ class XmlAllocator {
   XmlPage<4096> txt;
 };
 
-template <class N, class P>
-class XmlNode {
- protected:
-  /* clang-format off */
+namespace internal {
+
+/* clang-format off */
   static char constexpr xctypes[] = {
     /* 1 */
     16,0,0,0,0,0,0,0, /* 0-7*/
@@ -1658,15 +1613,24 @@ class XmlNode {
     0,0,0,0,0,0,0,0, /* 112-119 */
     0,0,0,0,0,0,0,0, /* 120-127 */
   };
-  /* clang-format on */
+/* clang-format on */
+} // namespace internal
 
-  char* m_tag;
-  char* m_data;
-  N*    m_next;
+template <class N, class P>
+class XmlNode {
+ protected:
+  XmlAllocator* m_allo;
+  char*         m_tag;
+  char*         m_data;
+  N*            m_next;
 
-  bool  skip(XmlPredicate pred, char* s, char** ep) {
+  void          set_allocator(XmlAllocator* allo) {
+    m_allo = allo;
+  }
+
+  bool skip(XmlPredicate pred, char* s, char** ep) {
     char* p = s;
-    while(xctypes[*p] & pred)
+    while(internal::xctypes[*p] & pred)
       p++;
     return (*ep) = p, s != p;
   }
@@ -1769,10 +1733,26 @@ class XmlNode {
   }
 
  public:
+  XmlNode()               = default;
+  XmlNode(const XmlNode&) = delete;
+
+  XmlNode(const scl::string& tag, const scl::string& data = scl::string()) {
+    set_tag(tag);
+    set_data(data);
+  }
+
+  static void* operator new(size_t n, XmlAllocator& alloc) {
+    XmlNode* ptr = (XmlNode*)alloc.nodes.alloc(sizeof(N));
+    ptr->m_allo  = &alloc;
+    return ptr;
+  }
+
+  static void operator delete(void* ptr, XmlAllocator& alloc) {};
+
   /**
    * @return  Pointer to the next node.
    */
-  N* next() const {
+  N*          next() const {
     return m_next;
   }
 
@@ -1788,11 +1768,22 @@ class XmlNode {
   /**
    * @brief Set the tag of the node.
    *
-   * @param doc  Reference to the document that ownes this node.
    * @param tag  New tag.
    */
-  void set_tag(XmlAllocator& doc, const scl::string& tag) {
-    m_tag = doc.txt.alloc((int)tag.len() + 1);
+  void set_tag(const scl::string& tag) {
+    m_tag = m_allo->txt.alloc((int)tag.len() + 1);
+    memcpy(m_tag, tag.cstr(), tag.len());
+  }
+
+  /**
+   * @brief Set the tag of the node.
+   *
+   * @param allo  Reference to the document that ownes this node.
+   * @param tag  New tag.
+   */
+  [[deprecated("Use set_tag without the document argument")]] void set_tag(
+    XmlAllocator& allo, const scl::string& tag) {
+    m_tag = allo.txt.alloc((int)tag.len() + 1);
     memcpy(m_tag, tag.cstr(), tag.len());
   }
 
@@ -1829,15 +1820,31 @@ class XmlNode {
    * @param doc  Reference to the document that ownes this node.
    * @param data  New data.
    */
-  void set_data(XmlAllocator& doc, const string& data) {
+  void set_data(const string& data) {
     if(data) {
-      m_data = doc.txt.alloc((int)data.len() + 1);
+      m_data = m_allo->txt.alloc((int)data.len() + 1);
       memcpy(m_data, data.cstr(), data.len());
     } else {
       m_data = NULL;
     }
   }
-};
+
+  /**
+   * @brief Set the data of the node.
+   *
+   * @param allo  Reference to the document that ownes this node.
+   * @param data  New data.
+   */
+  [[deprecated("Use set_data without the document argument")]] void set_data(
+    XmlAllocator& allo, const string& data) {
+    if(data) {
+      m_data = m_allo->txt.alloc((int)data.len() + 1);
+      memcpy(m_data, data.cstr(), data.len());
+    } else {
+      m_data = NULL;
+    }
+  }
+}; // namespace internal
 
 class XmlAttr : public XmlNode<XmlAttr, XmlElem> {
   friend class XmlElem;
@@ -1872,6 +1879,11 @@ class XmlAttr : public XmlNode<XmlAttr, XmlElem> {
     if(m_next)
       stream.write(" ", 1, s);
     return OK;
+  }
+
+ public:
+  XmlAttr(const scl::string& tag, const scl::string& data)
+      : XmlNode(tag, data) {
   }
 };
 
@@ -1925,6 +1937,20 @@ class XmlElem : public XmlNode<XmlElem, XmlElem> {
       ++p;
       return parse<f>(allo, leave, parent, p, ep);
     }
+    if(*p == '!' && p[1] == '-' && p[2] == '-') {
+      bool yay = false;
+      p += 3;
+      while(*p) {
+        if(*p == '-' && p[1] == '-' && p[2] == '>') {
+          p += 3;
+          *ep = p;
+          yay = true;
+          break;
+        }
+        p++;
+      }
+      return;
+    }
     if(!skip(TAG_PRED, s, &p))
       throw XmlResult(TAG, s);
     char* pn = p;
@@ -1932,6 +1958,7 @@ class XmlElem : public XmlNode<XmlElem, XmlElem> {
     skip(SPACE_PRED, p, &p);
     while(*p != '>' && *p != '/' && *p) {
       XmlAttr* attr = allo.nodes.alloc<xml::XmlAttr>();
+      attr->set_allocator(&allo);
       attr->parse<f>(allo, p, &p);
       add_attr(attr);
       skip(SPACE_PRED, p, &p);
@@ -1944,6 +1971,7 @@ class XmlElem : public XmlNode<XmlElem, XmlElem> {
       pn = p;
       while(1) {
         xml::XmlElem* celem = allo.nodes.alloc<xml::XmlElem>();
+        celem->set_allocator(&allo);
         celem->parse<f>(allo, leave, this, p, &p);
         *pn = '\0';
         if(m_data && !leave)
@@ -1971,6 +1999,10 @@ class XmlElem : public XmlNode<XmlElem, XmlElem> {
  public:
   XmlElem() {
     zero();
+  }
+
+  XmlElem(const scl::string& tag, const scl::string& data = (const char*)0)
+      : XmlNode(tag, data) {
   }
 
   /**
@@ -2203,6 +2235,10 @@ class XmlDocument : public XmlElem, public XmlAllocator {
   string source;
 
  public:
+  XmlDocument() {
+    m_allo = this;
+  }
+
   ~XmlDocument() {
     nodes.free();
     txt.free();
@@ -2264,10 +2300,8 @@ class XmlDocument : public XmlElem, public XmlAllocator {
    * @brief  Creates a new attribute, owned by this document.
    *
    */
-  XmlAttr* new_attr(const scl::string& tag, const scl::string& data) {
-    XmlAttr* a = nodes.alloc<XmlAttr>();
-    a->set_tag(*this, tag);
-    a->set_data(*this, data);
+  XmlAttr* new_attr(const string& tag, const string& data) {
+    XmlAttr* a = new(*this) XmlAttr(tag, data);
     return a;
   }
 
@@ -2275,10 +2309,8 @@ class XmlDocument : public XmlElem, public XmlAllocator {
    * @brief  Creates a new element, owned by this document.
    *
    */
-  XmlElem* new_elem(const scl::string& tag, scl::string data = scl::string()) {
-    XmlElem* e = nodes.alloc<XmlElem>();
-    e->set_tag(*this, tag);
-    e->set_data(*this, data);
+  XmlElem* new_elem(const string& tag, string data = string()) {
+    XmlElem* e = new(*this) XmlElem(tag, data);
     return e;
   }
 };
@@ -2294,6 +2326,7 @@ class XmlDocument : public XmlElem, public XmlAllocator {
 #ifndef JOBS_H
 #define JOBS_H
 
+#include <climits>
 #include <vector>
 #include <thread>
 #include <queue>
@@ -2332,12 +2365,27 @@ class waitable {
  protected:
  public:
   waitable();
+  waitable(waitable&& rhs);
+  waitable& operator=(waitable&& rhs);
 
   /**
    * @brief Completes the waitable.
    *
    */
-  void complete();
+  void      complete();
+
+  /**
+   * @brief Resets the completion state.
+   */
+  void      reset();
+
+  /**
+   * @brief Returns the completion status of the waitable.
+   *
+   * @return true if the waitable is completed.
+   * @return false if otherwise.
+   */
+  bool      status() const;
 
   /**
    * @brief Waits for this waitable to be marked completed.
@@ -2345,7 +2393,7 @@ class waitable {
    * @param timeout  Max number of seconds to wait.
    * @return   True: Wait did not time out, False: Wait did time out.
    */
-  bool wait(double timeout = -1);
+  bool      wait(double timeout = -1);
 };
 
 class JobWorker;
@@ -2770,44 +2818,164 @@ class reduce_stream : public stream {
 
 namespace scl {
 namespace pack {
+class PackIndex;
 class Packager;
 class PackFetchJob;
-
-struct PackIndex {
-  scl::path m_file;
-  size_t    m_off = 0, m_size = 0, m_original = 0;
-};
+class PackWriteJob;
 
 class PackWaitable : public jobs::waitable {
+  friend class Packager;
+  friend class PackIndex;
   friend class PackFetchJob;
+  friend class PackWriteJob;
 
-  scl::stream* m_active;
+  int          m_tid    = -1;
+  scl::stream* m_stream = nullptr;
 
  public:
-  PackWaitable(scl::stream* active);
+  PackWaitable() = default;
+  PackWaitable(scl::stream* stream);
 
-  scl::stream& content() {
+  scl::stream& stream() {
     wait();
-    return *m_active;
+    return *m_stream;
   }
 
   scl::stream* operator->() {
     wait();
-    return m_active;
+    return m_stream;
   }
+};
+
+/* Structure that details a packager file/index.
+  Contains offset and size info of packaged and source content.
+  Also contains info for "active" files.
+*/
+class PackIndex {
+  friend class Packager;
+  friend class PackFetchJob;
+  friend class PackWriteJob;
+
+ private:
+  PackWaitable m_wt;
+  Packager*    m_family;
+  scl::string* m_file;
+  uint32_t     m_off = 0, m_size = 0, m_original = 0;
+  bool         m_active = 0, m_submitted = 0;
+  uint8_t      m_pack = 0;
+
+ public:
+  PackIndex(const scl::string* file = nullptr);
+  PackIndex(PackIndex&& rhs);
+  PackIndex&         operator=(PackIndex&& rhs);
+
+  /**
+   * @brief Returns the filepath associated with this index
+   *
+   * @return filepath in the pack
+   */
+  const scl::string& filepath() const;
+
+  /**
+   * @brief Returns the compressed size of this file, if it has been compressed.
+   * Returns 0 if it hasnt been compressed.
+   * Note: Files are compressed either when they are loaded from a pack, or are
+   * written.
+   */
+  uint32_t           compressed() const {
+    return m_size;
+  }
+
+  /**
+   * @brief Returns the original size of this file, if it is known.
+   * Returns 0 if the original size isnt known.
+   * Note: Original size is known either when they are loaded from a pack, or
+   * are written.
+   *
+   * @return
+   */
+  uint32_t original() const {
+    return m_original;
+  }
+
+  /**
+   * @brief Returns this file's waitable.
+   *  Note: The waitable's stream is NULL if
+   * this file is inactive.
+   *
+   * @return waitable reference
+   */
+  PackWaitable& waitable();
+
+
+  /**
+   * @brief Submit this file index for writing.
+   * @note If this file index's stream isnt opened by the user, scl will attemt
+   * to open it itself, using the given filename, while writing this file index.
+   * @note It is reccomended to let scl automatically open this index, if this
+   * index represents a local file.
+   *
+   * @return reference to this object
+   */
+  PackIndex&    submit();
+
+  /**
+   * @brief Convenience function to open this file's stream.
+   * Calls scl::stream::open with this index's filepath.
+   * For more function info, see scl::stream::open.
+   *
+   * @param  mode  open mode
+   * @param  binary  open in binary mode
+   * @return true if opened succesfully
+   * @return false if otherwise
+   */
+  bool          open(OpenMode mode, bool binary = false);
+
+  /**
+   * @brief Returns the stream of this file index.
+   * @warning This function can return NULL if there is no stream attributed to
+   * this index, which can happen if it hasnt been opened via openFile, or
+   * openFiles.
+   *
+   * @return Pointer to this index's stream
+   */
+  scl::stream*  stream();
+
+  /**
+   * @brief Returns the stream of this file index.
+   * @warning This function can return NULL if there is no stream attributed to
+   * this index, which can happen if it hasnt been opened via openFile, or
+   * openFiles.
+   *
+   * @return Pointer to this index's stream
+   */
+  scl::stream*  operator->() {
+    return m_wt.m_stream;
+  }
+
+  /**
+   * @brief Returns whether or not this file is active (loaded).
+   *
+   * @return true if active
+   * @return false if not
+   */
+  bool isactive() const;
+
+  /**
+   * @brief If this file is active, and isnt submitted, it will be
+   * deactivated (deloaded).
+   *
+   */
+  void release();
 };
 
 // Job to decompress a file from a stream into memory
 class PackFetchJob : public jobs::job<PackWaitable> {
-  PackIndex           m_indx;
-  Packager*           m_pack;
-  scl::reduce_stream* m_archive;
-  scl::stream*        m_out;
-  int                 m_sid;
+  PackIndex& m_idx;
+  Packager&  m_pack;
 
  public:
-  PackFetchJob(Packager* pack, scl::reduce_stream* archive, scl::stream* out,
-    PackIndex indx, int sid);
+  PackFetchJob(PackIndex& idx, Packager& pack);
 
   PackWaitable* getWaitable() const override;
 
@@ -2816,40 +2984,131 @@ class PackFetchJob : public jobs::job<PackWaitable> {
   void          doJob(PackWaitable* wt, const jobs::JobWorker& worker) override;
 };
 
-enum PackResult {
-  OK,
-  ERROR,
-  FILE,
-  FULL,
-};
-
-class Packager : protected std::mutex {
-  friend class PackFetchJob;
-
- private:
-  scl::path                        m_family;
-  scl::path                        m_dir;
-  scl::reduce_stream               m_archive;
-  scl::dictionary<PackIndex>       m_index;
-  // Uncompressed files, user side
-  scl::dictionary<scl::stream>     m_activ;
-  scl::dictionary<jobs::waitable*> m_wts;
-  size_t                           m_ioff = 0;
+class PackWriteJob : public jobs::job<PackWaitable> {
+  friend class Packager;
+  PackIndex& m_idx;
+  Packager&  m_pack;
 
  public:
+  PackWriteJob(PackIndex& idx, Packager& pack);
+
+  PackWaitable* getWaitable() const override;
+
+  // bool          checkJob(const jobs::JobWorker& worker) const override;
+
+  void          doJob(PackWaitable* wt, const jobs::JobWorker& worker) override;
+};
+
+/**
+ * @brief Class representing a family of asset packages.
+ *  Allows you to read, write, etc.
+ *
+ */
+class Packager : protected std::mutex {
+  friend class PackFetchJob;
+  friend class PackWriteJob;
+  friend class PackIndex;
+
+ private:
+  jobs::JobServer                  m_serv;
+  scl::path                        m_family;
+  scl::path                        m_ext;
+  scl::dictionary<PackIndex>       m_index;
+  std::vector<PackIndex*>          m_submitted;
+  std::vector<scl::reduce_stream*> m_archives;
+  // Reduce queue mutex
+  std::mutex                       m_remux;
+  std::queue<scl::reduce_stream*>  m_reduces;
+  // Queue of in-progress compressions
+  std::queue<PackIndex*>           m_writing;
+  std::atomic_uint32_t             m_waiting;
+  int                              m_workers;
+  bool                             m_open = false;
+
+  enum class mPackRes {
+    // Continue
+    OK = 0,
+    // Current element overflowed member pack. Attempt on new member
+    WOVERFLOW = 1,
+    // Error
+    GENERAL_ERROR = 2,
+  };
+
+  bool     readIndex(scl::reduce_stream& archive, uint32_t bid);
+  mPackRes writeMemberPack(scl::stream& archive, size_t& elemid, int memberid,
+    const scl::string& buildid, std::function<void(size_t, PackIndex*)>& cb);
+
+ public:
+  Packager(int nworkers = INT_MAX);
   ~Packager();
 
-  bool open(const scl::path& path);
-  [[nodiscard]]
-  PackWaitable& openFile(const scl::path& path);
-  [[nodiscard]]
-  std::vector<PackWaitable*> openFiles(const std::vector<scl::path>& files);
+  /**
+   * @brief Opens the pack family from the given name
+   *
+   * @param  path  pack family path
+   * @return true if success
+   * @return false if otherwise
+   */
+  bool                    open(const scl::path& path);
 
+  /**
+   * @brief Requests the given filepath to be indexed (if not already), or
+   * decompressed (if already in pack).
+   *
+   * @param  path filepath to be opened
+   * @return Pointer to the pack index of the given path.
+   */
+  PackIndex*              openFile(const scl::path& path);
+
+  /**
+   * @brief Vectored version of openFile. For info, see openFile().
+   *
+   * @param  files  vector of files to open.
+   * @return Vector of pack indices for the given files.
+   */
+  std::vector<PackIndex*> openFiles(const std::vector<scl::path>& files);
+
+  /**
+   * @brief Submits a file to be written to the pack when write() is called.
+   * @note Files will only be written if they are active by the time write() is
+   called.
+
+   * This function will block simultanious calls.
+   *
+   * @param  path
+   * @return <b>true</b> if file was successfully submitted.
+   */
+  bool                    submit(const scl::path& path);
+
+  /**
+   * @brief Writes all submitted files to the pack.
+   * Invalidates all inactive pack files at the time of the call.
+   * @warning This function will call close(), and invalidate all info related
+   * to this packager.
+   *
+   * @param  cb Callback called with (elementid, pack_index), elementid being
+   * its submission id, and pack_index being the index related to it. Called
+   * after a file has been succesfully compressed, but not fully written.
+   * @return true on success
+   * @return false if otherwise.
+   */
+  bool write(std::function<void(size_t, PackIndex*)> cb = {});
+
+  /**
+   * @brief Returns the dictionary containing every index known in this pack
+   * family.
+   *
+   * @return
+   */
   const scl::dictionary<PackIndex>& index();
 
-  void                              close();
+  PackIndex*                        operator[](const scl::string& path);
 
-  bool                              write();
+  /**
+   * @brief Closes this pack.
+   *
+   */
+  void                              close();
 };
 
 bool packInit();
@@ -2890,6 +3149,8 @@ void packTerminate();
 #  include <unistd.h>
 #  include <math.h>
 #endif
+
+#define SCL_MAX_REFS 4096
 
 static int  seed_ = 1;
 
@@ -2960,108 +3221,29 @@ unsigned char log2i(unsigned x) {
   return r;
 }
 
-namespace internal {
-// TODO: Rework GC system?
-// It works fine right, now but has some drawbacks (syncronous linear time slot
-// allocation), which i feel could be better
+namespace internal {} // namespace internal
 
-static uchar       refs[SCL_MAX_REFS] = {0};
-static std::mutex* g_mmut             = nullptr;
-
-bool               RefObj::findslot() {
-  bool out = false;
-  // Shrug
-  if(!g_mmut)
-    return false;
-  g_mmut->lock();
-  for(int i = 1; i < SCL_MAX_REFS; i++) {
-    if(!internal::refs[i]) {
-      m_refi = i;
-      if(m_refi)
-        internal::refs[m_refi]++;
-      out = true;
-      break;
-    }
-  }
-  g_mmut->unlock();
-  return out;
+bool string::isview() const {
+  return m_buf && !m_sz;
 }
 
-void RefObj::incslot() const {
-  if(!g_mmut)
+void string::make_unique() {
+  if(!isview() || !*this)
     return;
-  g_mmut->lock();
-  if(m_refi)
-    internal::refs[m_refi]++;
-  g_mmut->unlock();
+  char* buf = new char[m_ln + 1];
+  memcpy(buf, m_buf, (size_t)m_ln + 1);
+  m_sz = m_ln;
 }
-
-bool RefObj::decslot() {
-  if(!g_mmut)
-    return false;
-  g_mmut->lock();
-  bool out = false;
-  if(m_refi && !--internal::refs[m_refi]) {
-    m_refi = 0;
-    out    = true;
-  }
-  g_mmut->unlock();
-  return out;
-}
-
-RefObj::RefObj() {
-  findslot();
-}
-
-RefObj::RefObj(const RefObj& ro) {
-  m_refi = ro.m_refi;
-  incslot();
-}
-
-RefObj::~RefObj() {
-}
-
-int RefObj::refs() const {
-  return m_refi ? internal::refs[m_refi] : 0;
-}
-
-bool RefObj::deref() {
-  return decslot();
-}
-
-bool RefObj::make_unique(bool copy) {
-  // No need, already unique
-  if(refs() == 1)
-    return false;
-  bool d = deref();
-  findslot();
-  if(copy)
-    mutate(d);
-  return true;
-}
-
-void RefObj::ref(const RefObj& ro) {
-  deref();
-  m_refi = ro.m_refi;
-  incslot();
-}
-
-bool RefObj::operator==(const RefObj& rhs) const {
-  return m_refi && m_refi == rhs.m_refi;
-}
-} // namespace internal
 
 string::string() {
 }
 
-string::string(const char* str) {
-  view(str);
+string::string(const std::string& str) {
+  *this = string(str.c_str()).copy();
 }
 
-string::~string() {
-  if(deref() && *this) {
-    delete[] m_buf;
-  }
+string::string(const char* str) {
+  view(str);
 }
 
 #ifdef _WIN32
@@ -3078,44 +3260,47 @@ string::string(const wchar_t* wstr) {
 }
 #endif
 
-string::string(const string& rhs)
-    : RefObj(rhs), m_buf(rhs.m_buf), m_ln(rhs.m_ln), m_sz(rhs.m_sz) {
+string::string(const string& rhs) {
+  if(rhs) {
+    if(rhs.isview()) {
+      m_buf = rhs.m_buf;
+      m_ln  = rhs.m_ln;
+      m_sz  = rhs.m_sz;
+    } else {
+      m_sz  = rhs.size();
+      m_buf = new char[m_sz + 1];
+      memcpy(m_buf, rhs.m_buf, (size_t)m_sz + 1);
+      m_ln = rhs.m_ln;
+    }
+  }
+}
+
+string::~string() {
+  if(!isview() && *this) {
+    delete[] m_buf;
+  }
 }
 
 string& string::operator=(const string& rhs) {
-  if(this->internal::RefObj::operator==(rhs))
-    return *this;
   clear();
-  ref(rhs);
-  m_buf = rhs.m_buf;
-  m_ln  = rhs.m_ln;
-  m_sz  = rhs.m_sz;
+  if(rhs) {
+    if(rhs.isview()) {
+      m_buf = rhs.m_buf;
+      m_ln  = rhs.m_ln;
+      m_sz  = rhs.m_sz;
+    } else {
+      m_sz  = rhs.size();
+      m_buf = new char[m_sz + 1];
+      memcpy(m_buf, rhs.m_buf, (size_t)m_sz + 1);
+      m_ln = rhs.m_ln;
+    }
+  }
   return *this;
 }
 
-void string::mutate(bool free) {
-  m_ln = m_buf ? m_ln : 0;
-  m_sz = m_buf ? m_sz : 0;
-  if(m_ln) {
-    char* nbuf = new char[m_sz + 1];
-    memset(nbuf, 0, (size_t)m_sz + 1);
-    if(m_buf) {
-      memcpy(nbuf, m_buf, m_sz);
-      if(free)
-        delete[] m_buf;
-    }
-    m_buf = nbuf;
-  } else {
-    m_buf = nullptr;
-    m_ln  = 0;
-    m_sz  = 0;
-  }
-}
-
 void string::clear() {
-  if(!make_unique(false) && *this) {
+  if(!isview() && *this)
     delete[] m_buf;
-  }
   m_buf = nullptr;
   m_ln  = 0;
   m_sz  = 0;
@@ -3131,10 +3316,9 @@ string& string::claim(const char* ptr) {
 
 string& string::view(const char* ptr) {
   // Become untracked, as we are only viewing
-  deref();
+  clear();
   m_buf = (char*)ptr;
   m_ln  = ptr ? (unsigned)strlen(ptr) : 0;
-  m_sz  = m_ln;
   return *this;
 }
 
@@ -3201,7 +3385,10 @@ unsigned string::len() const {
 }
 
 unsigned string::size() const {
-  return m_sz;
+  if(!isview())
+    return m_sz;
+  else
+    return m_ln;
 }
 
 long long string::ffi(const string& pattern) const {
@@ -3209,7 +3396,7 @@ long long string::ffi(const string& pattern) const {
     return -1;
   const char* p   = m_buf;
   unsigned    csl = (unsigned)pattern.len();
-  for(; *p; p++) {
+  for(; p < m_buf + m_sz && *p; p++) {
     if(!strncmp(p, pattern.cstr(), csl))
       return (long long)(p - m_buf);
   }
@@ -3222,7 +3409,7 @@ long long string::fli(const string& pattern) const {
   const unsigned l   = m_ln;
   unsigned       csl = pattern.m_ln;
   const char*    p   = m_buf + l - csl;
-  for(; *p && p >= m_buf; p--) {
+  for(; p >= m_buf && *p; p--) {
     if(!strncmp(p, pattern.m_buf, csl))
       return (long long)(p - m_buf);
   }
@@ -3273,11 +3460,11 @@ string string::substr(unsigned i, unsigned j) const {
   memcpy(out, m_buf + i, j);
   string sout;
   sout.claim(out);
-  return sout;
+  return std::move(sout);
 }
 
 string& string::replace(const string& pattern, const string& with) {
-  if(!*this || !pattern || !with)
+  if(!*this || !pattern)
     return *this;
   const char* str = m_buf;
   string      out;
@@ -3292,6 +3479,26 @@ string& string::replace(const string& pattern, const string& with) {
     str += p + pattern.m_ln;
   }
   *this = out;
+  return *this;
+}
+
+scl::string& string::replace(const scl::string& with, int i, int j) {
+  if(!*this || i >= m_ln)
+    return *this;
+  if(j < 0)
+    j = 0x7fffffff;
+  auto l = with.len();
+  j      = std::min(j, (int)m_ln - i);
+  int d  = size() - i - j;
+  if(i + l + d > size())
+    reserve(i + l + d);
+  else if(isview())
+    make_unique();
+  if(d)
+    memcpy(m_buf + i + l, m_buf + i, d);
+  memcpy(m_buf + i, with.cstr(), l);
+  m_buf[i + l + d] = 0;
+  m_ln             = i + l + d;
   return *this;
 }
 
@@ -3343,6 +3550,7 @@ string string::rand(unsigned len) {
   unsigned i;
   for(i = 0; i < len; i++) {
     str[i] = rchars[rand_int(0, sizeof(rchars) - 1)];
+    str.m_ln++;
   }
   return str;
 }
@@ -3424,7 +3632,12 @@ string string::operator+(const string& rhs) const {
 }
 
 string::operator bool() const {
-  return m_buf;
+  return m_buf && (m_ln || m_sz);
+}
+
+std::ostream& operator<<(std::ostream& out, const scl::string& str) {
+  out << str.cstr();
+  return out;
 }
 
 std::ifstream& operator>>(std::ifstream& in, string& str) {
@@ -3580,7 +3793,7 @@ bool waitUntil(std::function<bool()> cond, double timeout, double sleepms) {
   while(!cond() && !timedout) {
     scl::waitms(sleepms);
     ce       = scl::clock();
-    timedout = ((ce - cs) * 1000 < timeout && !infinite);
+    timedout = ((ce - cs) > timeout && !infinite);
   }
   return !timedout;
 }
@@ -3591,7 +3804,6 @@ stream::stream(stream&& rhs) {
   m_fp           = rhs.m_fp;
   m_size         = rhs.m_size;
   m_ronly        = rhs.m_ronly;
-  m_wonly        = rhs.m_wonly;
   m_modified     = rhs.m_modified;
 
   rhs.m_stream   = 0;
@@ -3599,7 +3811,6 @@ stream::stream(stream&& rhs) {
   rhs.m_fp       = 0;
   rhs.m_size     = 0;
   rhs.m_ronly    = 0;
-  rhs.m_wonly    = 0;
   rhs.m_modified = 0;
 }
 
@@ -3609,7 +3820,6 @@ stream& stream::operator=(stream&& rhs) {
   m_fp           = rhs.m_fp;
   m_size         = rhs.m_size;
   m_ronly        = rhs.m_ronly;
-  m_wonly        = rhs.m_wonly;
   m_modified     = rhs.m_modified;
 
   rhs.m_stream   = 0;
@@ -3617,30 +3827,32 @@ stream& stream::operator=(stream&& rhs) {
   rhs.m_fp       = 0;
   rhs.m_size     = 0;
   rhs.m_ronly    = 0;
-  rhs.m_wonly    = 0;
   rhs.m_modified = 0;
   return *this;
 }
 
-stream::~stream() {
+void stream::close_internal() {
   flush();
-  if(m_stream) {
+  if(m_stream)
     fclose(m_stream);
-    m_stream = nullptr;
-  }
-  if(m_data) {
+  if(m_data)
     delete[] m_data;
-  }
+  m_stream   = 0;
+  m_data     = 0;
+  m_fp       = 0;
+  m_size     = 0;
+  m_ronly    = 0;
+  m_modified = 0;
+}
+
+stream::~stream() {
+  close_internal();
 }
 
 long long stream::bounds(const char* p, size_t n) const {
-  n = std::min(n, m_size);
   if(p >= m_data + m_size)
     return 0;
-  size_t s = (m_size - n), o = (m_data - p);
-  if(n < s + o)
-    return 0;
-  return n - s - o;
+  return std::min(n, m_size - (p - m_data));
 }
 
 long long stream::read_internal(void* buf, size_t n) {
@@ -3667,6 +3879,8 @@ long long stream::read_internal(void* buf, size_t n) {
   return r;
 }
 
+#define alignup(x, align) ((((x) + ((align) - 1)) / (align)) * align)
+
 bool stream::write_internal(const void* buf, size_t n, size_t align) {
   if(!buf)
     return false;
@@ -3677,13 +3891,13 @@ bool stream::write_internal(const void* buf, size_t n, size_t align) {
     fflush(m_stream);
     return r;
   }
-  long long res = ((tell() + n + (align - 1)) / align) * align - m_size;
-  if(res > 0) {
+  if(n > (m_size - (m_fp - m_data))) {
+    size_t res = alignup(m_size + n, align) - m_size;
     if(!reserve(res))
       return false;
   }
   memcpy(m_fp, buf, n);
-  m_fp += n;
+  m_fp       = std::min(m_fp + n, m_data + m_size);
   m_modified = true;
   return true;
 }
@@ -3701,6 +3915,12 @@ long long stream::tell() const {
     return ftell(m_stream);
   }
   return m_fp - m_data;
+}
+
+size_t stream::size() const {
+  if(m_stream)
+    return 0;
+  return m_size;
 }
 
 void stream::reset_modified() {
@@ -3840,15 +4060,7 @@ bool stream::write(stream& src, size_t max) {
 }
 
 void stream::close() {
-  flush();
-  if(m_stream) {
-    fclose(m_stream);
-    m_stream = nullptr;
-  }
-  if(m_data)
-    delete[] m_data;
-  // Reset members
-  scl::stream();
+  close_internal();
 }
 
 const void* stream::data() {
@@ -3860,7 +4072,7 @@ void* stream::release() {
   if(m_data) {
     ptr = m_data;
     // Reset members
-    *this = scl::stream();
+    close_internal();
   }
   return ptr;
 }
@@ -3890,16 +4102,11 @@ stream& stream::operator>>(scl::string& str) {
 }
 
 bool init() {
-  internal::g_mmut = new std::mutex();
-  bool pack        = pack::packInit();
-  return pack;
+  srand_(scl::clock());
+  return true;
 }
 
 void terminate() {
-  pack::packTerminate();
-  delete internal::g_mmut;
-  memset(internal::refs, 0, sizeof(internal::refs));
-  internal::g_mmut = nullptr;
 }
 } // namespace scl
 
@@ -3915,6 +4122,9 @@ void terminate() {
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
 #  endif
 #  include <windows.h>
 #  include <io.h>
@@ -3939,7 +4149,7 @@ namespace scl {
 path::path() {
 }
 
-path::path(const string &rhs) : string(rhs) {
+path::path(const string& rhs) : string(rhs) {
 #ifdef _WIN32
   replace("/", "\\");
 #else
@@ -3947,7 +4157,7 @@ path::path(const string &rhs) : string(rhs) {
 #endif
 }
 
-path::path(const char *rhs) : string(rhs) {
+path::path(const char* rhs) : string(rhs) {
 #ifdef _WIN32
   replace("/", "\\");
 #else
@@ -3955,11 +4165,11 @@ path::path(const char *rhs) : string(rhs) {
 #endif
 }
 
-path &path::fixendsplit() {
+path& path::fixendsplit() {
   unsigned p = len() - 1;
-  for(char c; p != (unsigned)-1 && p >= 0 && (c = (*this)[p]) &&
-              (c == '/' || c == '\\');
-      p--) {
+  for(char c;
+    p != (unsigned)-1 && p >= 0 && (c = (*this)[p]) && (c == '/' || c == '\\');
+    p--) {
   }
   if(p != len() - 1)
     *this = substr(0, p + 1);
@@ -3973,17 +4183,17 @@ path path::resolve() const {
 #if defined(_WIN32)
   _fullpath(fpath, cstr(), PATH_MAX);
 #elif defined(__unix__) || defined(__APPLE__)
-  char *_ = realpath(cstr(), fpath);
+  char* _ = realpath(cstr(), fpath);
 #endif
   return path(fpath).copy();
 }
 
-bool path::haspath(const path &path) const {
+bool path::haspath(const path& path) const {
   scl::path fixed = path.resolve().fixendsplit();
   return resolve().ffi(fixed) >= 0;
 }
 
-static path trimpath(const path &path, const scl::path &with) {
+static path trimpath(const path& path, const scl::path& with) {
   std::vector<scl::path> comp;
   auto                   frc = with.split();
   auto                   fic = path.split();
@@ -3995,7 +4205,7 @@ static path trimpath(const path &path, const scl::path &with) {
   return path::join(comp);
 }
 
-path path::relative(const path &base) const {
+path path::relative(const path& base) const {
   if(!isabsolute())
     return *this;
   scl::path copy = base.resolve();
@@ -4018,9 +4228,9 @@ path path::parentpath() const {
   if(!*this)
     return "";
   auto        real = resolve();
-  const char *abs  = real.cstr();
+  const char* abs  = real.cstr();
   int         l    = real.len();
-  char       *p    = (char *)abs + l - 1;
+  char*       p    = (char*)abs + l - 1;
   int         n    = -1;
   for(; *p && p >= abs; --p)
     if(*p == '/' || *p == '\\') {
@@ -4035,10 +4245,10 @@ path path::parentpath() const {
 }
 
 path path::filename() const {
-  auto c = split();
-  if(c.size() > 0)
-    return c.back();
-  return "";
+  auto p = std::max(fli("/"), fli("\\"));
+  if(p == -1)
+    return *this;
+  return substr(p + 1);
 }
 
 string path::extension() const {
@@ -4059,12 +4269,16 @@ bool path::iswild() const {
 
 std::vector<path> path::split() const {
   std::vector<path> syms;
-  const char       *s = cstr(), *p = cstr();
+  const char *      s = cstr(), *p = cstr();
   if(!s)
     return syms;
   while(*s && *p) {
     while(*p && *p != '/' && *p != '\\')
       p++;
+    if(s == p) {
+      p++;
+      continue;
+    }
     string sym = substr(unsigned(s - cstr()), unsigned(p - s));
     if(sym.ffi("**") > 0)
       sym = "**";
@@ -4151,7 +4365,7 @@ void path::remove() const {
     return;
 }
 
-path &path::replaceFilename(const path &nFile) {
+path& path::replaceFilename(const path& nFile) {
   auto c = split();
   if(c.size() > 0) {
     c.back() = nFile;
@@ -4160,20 +4374,18 @@ path &path::replaceFilename(const path &nFile) {
   return *this;
 }
 
-path &path::replaceExtension(const path &nExt) {
-  auto c = split();
-  if(c.size() > 0) {
-    auto &file = c.back();
-    file.replace(file.extension(), nExt);
-    *this = join(c);
-  }
+path& path::replaceExtension(const path& nExt) {
+  auto p = fli(".");
+  if(p == -1)
+    return *this;
+  replace(nExt, p);
   return *this;
 }
 
-path &path::replaceStem(const path &nName) {
+path& path::replaceStem(const path& nName) {
   auto c = split();
   if(c.size() > 0) {
-    auto &file = c.back();
+    auto& file = c.back();
     file.replace(file.stem(), nName);
     *this = join(c);
   }
@@ -4200,20 +4412,20 @@ path path::execdir() {
   return path(buf).parentpath();
 }
 
-bool path::mkdir(const path &path) {
+bool path::mkdir(const path& path) {
   auto       dirs = path.split();
   class path dir;
-  for(auto &i : dirs) {
+  for(auto& i : dirs) {
     dir = dir / i;
     if(!dir.exists()) {
 #if defined(__unix__) || defined(__APPLE__)
-      struct stat s = {0};
-      if(stat(path.cstr(), &s) == -1) {
+      /*struct stat s = {0};
+      if(stat(dir.cstr(), &s) == -1) {
         return false;
-      }
-      ::mkdir(path.cstr(), 0755);
+      }*/
+      ::mkdir(dir.cstr(), 0755);
 #elif defined(_WIN32)
-      if(!CreateDirectoryA(path.cstr(), NULL))
+      if(!CreateDirectoryA(dir.cstr(), NULL))
         return false;
 #endif
     }
@@ -4221,7 +4433,7 @@ bool path::mkdir(const path &path) {
   return true;
 }
 
-bool path::copyfile(const path &from, const path &to) {
+bool path::copyfile(const path& from, const path& to) {
   scl::path::mkdir(to.parentpath());
   std::ifstream in(from.cstr(), std::ios_base::in | std::ios_base::binary);
   if(!in.is_open())
@@ -4237,7 +4449,7 @@ bool path::copyfile(const path &from, const path &to) {
   return true;
 }
 
-bool path::movefile(const path &from, const path &to) {
+bool path::movefile(const path& from, const path& to) {
 #ifdef _WIN32
   return !!MoveFileA(from.cstr(), to.cstr());
 #else
@@ -4246,23 +4458,47 @@ bool path::movefile(const path &from, const path &to) {
 }
 
 bool path::mkdir(std::vector<path> paths) {
-  for(auto &i : paths) {
-    if(!mkdir(i))
+  for(auto& i : paths) {
+#ifdef _WIN32
+    if(!CreateDirectoryA(i.cstr(), NULL))
       return false;
+#else
+    if(!::mkdir(i.cstr(), 0777))
+      return false;
+#endif
   }
   return true;
 }
 
-bool path::chdir(const path &path) {
+bool path::chdir(const path& path) {
 #if defined(_WIN32)
   return SetCurrentDirectory(path.cstr());
 #elif defined(__unix__) || defined(__APPLE__)
-  return !chdir(path.cstr());
+  return !::chdir(path.cstr());
 #endif
 }
 
-static int glob_(const path &dir, const path &mask, std::vector<path> &globs,
+template <typename T>
+static void align_reserve(std::vector<T>& vec, int add, int align = 128) {
+  if(vec.size() + add > vec.capacity()) {
+    add = (add / (align + 1) + 1) * align;
+    vec.reserve(vec.capacity() + add);
+  }
+}
+
+static void join_(char* buf, const scl::string& one, const scl::string& two) {
+  const auto l1 = one.len();
+  auto       l2 = two.len();
+  l2            = std::min(l2, l1 + l2 + 2 - PATH_MAX);
+  memcpy(buf, one.cstr(), l1);
+  buf[l1] = '/';
+  memcpy(buf + l1 + 1, two.cstr(), l2);
+  buf[l1 + l2 + 1] = 0;
+}
+
+static int glob_(const path dir, const path& mask, std::vector<path>& globs,
   scl::GlobMode mode = scl::GlobMode::FILES) {
+  char buf[PATH_MAX];
 #ifdef _WIN32
   const path       spec  = dir / (mask.iswild() ? "*" : mask);
   HANDLE           hFind = NULL;
@@ -4283,14 +4519,17 @@ static int glob_(const path &dir, const path &mask, std::vector<path> &globs,
 #endif
     if (fn == "." || fn == "..")
       continue;
-    path path = dir / (mask.iswild() ? fn : mask);
+    join_(buf, dir, (mask.iswild() ? fn : mask));
+    path path;
+    path.view(buf);
     bool validt = true;
     if (mode == scl::GlobMode::FILES && !path.isfile())
       validt = false;
     else if (mode == scl::GlobMode::DIRS && !path.isdirectory())
       validt = false;
     if (validt && (!mask.iswild() || string::match (fn.cstr(), mask.cstr()))) {
-      globs.push_back (path);
+      align_reserve(globs, 1, 256);
+      globs.push_back (path.copy());
     }
 #ifdef _WIN32
   } while (FindNextFile (hFind, &ffd) != 0);
@@ -4307,8 +4546,7 @@ static int glob_(const path &dir, const path &mask, std::vector<path> &globs,
   return 0;
 }
 
-static int glob_recurse(const string &mask, std::vector<path> &dirs,
-  std::vector<path> &finds, bool misdir = true) {
+static int glob_recurse(int root, const string& mask, std::vector<path>& dirs) {
   // For each in dirs, add to finds.
   /* LOOP
     For each in dirs, search for every directory (ndirs).
@@ -4323,30 +4561,45 @@ static int glob_recurse(const string &mask, std::vector<path> &dirs,
     For each in ndirs, add to finds.
     Set dirs to ndirs. Repeat until dirs is empty.
   */
-  for(auto &i : dirs)
-    finds.push_back(i);
+  std::vector<path> searches = dirs;
+  dirs.clear();
+  for(size_t i = 0; i < searches.size(); i++) {
+    glob_(searches[i], "*", searches, GlobMode::DIRS);
+    if(searches[i].filename().match(mask)) {
+      align_reserve(dirs, 1);
+      dirs.push_back(std::move(searches[i]));
+    }
+  }
+#if 0
   while(dirs.size() > 0) {
     std::vector<path> ndirs;
-    for(auto &i : dirs)
-      glob_(i, "*", ndirs, GlobMode::DIRS);
+    for(size_t i = 0; i < dirs.size(); i++) {
+      glob_(dirs[i], "*", dirs, GlobMode::DIRS);
+    }
     if(misdir) {
       dirs.clear();
-      for(auto &i : ndirs) {
-        if(i.match(mask))
+      for(auto& i : ndirs) {
+        if(i.match(mask)) {
+          align_reserve(finds, 1);
           finds.push_back(i);
-        else
+        } else {
+          align_reserve(dirs, 1);
           dirs.push_back(i);
+        }
       }
     } else {
-      for(auto &i : ndirs)
+      for(auto& i : ndirs) {
+        align_reserve(finds, 1);
         finds.push_back(i);
+      }
     }
-    dirs = ndirs;
+    dirs = std::move(ndirs);
   }
+#endif
   return 0;
 }
 
-std::vector<path> path::glob(const string &pattern, GlobMode mode) {
+std::vector<path> path::glob(const string& pattern, GlobMode mode) {
   auto                syms = path(pattern).split();
   /* LOOP (for each in syms)
     IF sym IS WILDCARD
@@ -4363,7 +4616,7 @@ std::vector<path> path::glob(const string &pattern, GlobMode mode) {
   //   Add glob to globs.
   std::vector<string> globs;
   path                glob;
-  for(auto &sym : syms) {
+  for(auto& sym : syms) {
     if(sym.iswild()) {
       if(glob)
         globs.push_back(glob);
@@ -4382,31 +4635,34 @@ std::vector<path> path::glob(const string &pattern, GlobMode mode) {
   // the results (ndirs).
   std::vector<path> dirs = {globs[0]}, finds;
   // For every dir glob
+  int               rootl = 0;
   for(long long i = 1; i < globs.size(); i++) {
-    std::vector<path> ndirs;
+    rootl += globs[i - 1].len();
     if(globs[i] == "**") {
       scl::string mask = "*";
+      // If not the last glob exp, use the next exp as the mask
       if(i < globs.size() - 1)
         mask = globs[i + 1];
-      glob_recurse(mask, dirs, ndirs, i < globs.size() - 2);
-      dirs = ndirs;
+      glob_recurse(rootl, mask, dirs);
+      i++;
     } else if(i != globs.size() - 1) {
-      // Find new search dirs
-      for(long long j = 0; j < dirs.size(); j++)
-        glob_(dirs[j], globs[i], ndirs, GlobMode::DIRS);
-      dirs = ndirs;
+// Find new search dirs
+#if 1
+      for(size_t j = 0; j < dirs.size(); j++)
+        glob_(dirs[j], globs[i], dirs, GlobMode::DIRS);
+#endif
     }
   }
   path fn = globs.back();
   // Find requested items
-  for(auto &dir : dirs)
+  for(auto& dir : dirs)
     glob_(dir, fn, finds, mode);
-  return finds;
+  return std::move(finds);
 }
 
 path path::join(std::vector<path> components, bool ignoreback) {
   path out;
-  for(auto &i : components) {
+  for(auto& i : components) {
     if(i == ".")
       continue;
     if(i == "..") {
@@ -4423,8 +4679,8 @@ path path::join(std::vector<path> components, bool ignoreback) {
   return out;
 }
 
-std::vector<path> path::splitPaths(const scl::string &paths) {
-  const char       *ps = paths.cstr(), *s = ps, *pe = s + paths.len();
+std::vector<path> path::splitPaths(const scl::string& paths) {
+  const char *      ps = paths.cstr(), *s = ps, *pe = s + paths.len();
   std::vector<path> out;
   while(*ps) {
     auto p = scl::string::ffi(ps, ";");
@@ -4433,10 +4689,10 @@ std::vector<path> path::splitPaths(const scl::string &paths) {
     out.push_back(paths.substr(ps - s, p));
     ps += p + 1;
   }
-  return out;
+  return std::move(out);
 }
 
-path &path::join(const path &rhs, bool relative) {
+path& path::join(const path& rhs, bool relative) {
   scl::path second;
 
   if(*this) {
@@ -4457,9 +4713,9 @@ path &path::join(const path &rhs, bool relative) {
   return *this;
 }
 
-path path::operator/(const path &rhs) const {
+path path::operator/(const path& rhs) const {
   path out = *this;
-  return out.join(rhs);
+  return std::move(out.join(rhs));
 }
 
 } // namespace scl
@@ -4490,8 +4746,25 @@ waitable::waitable() {
   m_done = false;
 }
 
+waitable::waitable(waitable&& rhs) {
+  m_done = rhs.m_done.load();
+}
+
+waitable& waitable::operator=(waitable&& rhs) {
+  m_done = rhs.m_done.load();
+  return *this;
+}
+
 void waitable::complete() {
   m_done = true;
+}
+
+void waitable::reset() {
+  m_done = false;
+}
+
+bool waitable::status() const {
+  return m_done.load();
 }
 
 bool waitable::wait(double timeout) {
@@ -4505,15 +4778,15 @@ bool waitable::wait(double timeout) {
                      timeout);
 }
 
-funcJob::funcJob(std::function<void(const JobWorker &worker)> func)
+funcJob::funcJob(std::function<void(const JobWorker& worker)> func)
     : m_func(func) {
 }
 
-waitable *funcJob::getWaitable() const {
+waitable* funcJob::getWaitable() const {
   return new waitable;
 }
 
-void funcJob::doJob(waitable *waitable, const JobWorker &worker) {
+void funcJob::doJob(waitable* waitable, const JobWorker& worker) {
   m_func(worker);
 }
 
@@ -4521,7 +4794,7 @@ void JobWorker::quit() {
   m_working = false;
 }
 
-JobWorker::JobWorker(JobServer *serv, int id) {
+JobWorker::JobWorker(JobServer* serv, int id) {
   m_serv    = serv;
   m_id      = id;
   m_working = false;
@@ -4532,11 +4805,11 @@ int JobWorker::id() const {
   return m_id;
 }
 
-JobServer &JobWorker::serv() const {
+JobServer& JobWorker::serv() const {
   return *m_serv;
 }
 
-void JobWorker::sync(const std::function<void()> &func) const {
+void JobWorker::sync(const std::function<void()>& func) const {
   m_serv->sync(func);
 }
 
@@ -4548,9 +4821,9 @@ bool JobWorker::busy() const {
   return m_busy;
 }
 
-void JobWorker::work(JobWorker *inst) {
+void JobWorker::work(JobWorker* inst) {
   inst->m_working = true;
-  JobServer *serv = inst->m_serv;
+  JobServer* serv = inst->m_serv;
   do {
     JobServer::t_wjob wjob;
     waitUntil(
@@ -4561,8 +4834,8 @@ void JobWorker::work(JobWorker *inst) {
       -1, SCL_JOBS_SLEEP(serv->m_slow));
     if(!inst->working())
       break;
-    job<waitable> *job = wjob.first;
-    waitable      *wt  = wjob.second;
+    job<waitable>* job = wjob.first;
+    waitable*      wt  = wjob.second;
 
     inst->m_busy       = true;
     if(job) {
@@ -4576,7 +4849,7 @@ void JobWorker::work(JobWorker *inst) {
   } while(inst->working());
 }
 
-bool JobServer::takeJob(t_wjob &wjob, const JobWorker &worker) {
+bool JobServer::takeJob(t_wjob& wjob, const JobWorker& worker) {
   if(!m_working)
     return false;
   lock();
@@ -4646,7 +4919,7 @@ void JobServer::start() {
     m_working = true;
     lock();
     for(int i = 0; i < m_nworkers; i++) {
-      JobWorker  *worker = new JobWorker(this, i);
+      JobWorker*  worker = new JobWorker(this, i);
       std::thread t(JobWorker::work, worker);
       t.swap(m_workers[i].first);
       m_workers[i].second = worker;
@@ -4669,7 +4942,7 @@ bool JobServer::waitidle(double timeout) {
     [&]() {
       lock();
       bool cond = m_jobs.empty();
-      for(auto &i : m_workers) {
+      for(auto& i : m_workers) {
         if(i.second->busy()) {
           cond = false;
           continue;
@@ -4685,7 +4958,7 @@ void JobServer::stop() {
   if(m_working) {
     // tell all workers to quit, then join worker
     m_working = false;
-    for(auto &i : m_workers) {
+    for(auto& i : m_workers) {
       i.second->quit();
       if(i.first.joinable())
         i.first.join();
@@ -4722,7 +4995,7 @@ void JobServer::clearjobs() {
   unlock();
 }
 
-void JobServer::sync(const std::function<void()> &func) {
+void JobServer::sync(const std::function<void()>& func) {
   if(!m_working)
     return;
   lock();
@@ -4730,8 +5003,8 @@ void JobServer::sync(const std::function<void()> &func) {
   unlock();
 }
 
-waitable *JobServer::submitJob(
-  std::function<void(const JobWorker &worker)> func, bool autodelwt) {
+waitable* JobServer::submitJob(
+  std::function<void(const JobWorker& worker)> func, bool autodelwt) {
   return &submitJob(new funcJob(func), autodelwt);
 }
 
@@ -4745,7 +5018,7 @@ void JobServer::Multithread(std::function<void(int id, int workers)> func,
   std::vector<std::thread> w;
   for(int i = 0; i < n; i++)
     w.push_back(std::thread(func, i, n));
-  for(auto &i : w) {
+  for(auto& i : w) {
     if(i.joinable())
       i.join();
   }
@@ -4760,17 +5033,27 @@ void JobServer::Multithread(std::function<void(int id, int workers)> func,
 
 /* #include "sclpack.hpp" */ 
 
-/* #include "sclxml.hpp" */ 
+#include <cassert>
 
+#define SPK_MAJOR       2
+#define SPK_MINOR       0
 
 #define SPK_HEADER_SIZE 32
 #define SPK_MAGIC       "SPK\x7f"
-#define SPK_IOFF        8
+#define SPK_H_MAJOR     4
+#define SPK_H_MINOR     5
+#define SPK_H_MID       6
+#define SPK_H_NMEMBS    7
+#define SPK_H_IOFF      8
+#define SPK_H_BID       12
 
+#define SPK_MAX_MEMBERS 32
 
-static scl::jobs::JobServer g_serv;
+#ifndef SPK_MAX_PACK_SIZE
+#  define SPK_MAX_PACK_SIZE 0xffffffff
+#endif
 
-bool                        is_little_endiann() {
+bool is_little_endiann() {
   volatile uint32_t i = 0x01234567;
   // return 0 for big endian, 1 for little endian.
   return (*((uint8_t*)(&i))) == 0x67;
@@ -4779,28 +5062,86 @@ bool                        is_little_endiann() {
 namespace scl {
 namespace pack {
 
-PackWaitable::PackWaitable(scl::stream* active) {
-  m_active = active;
+PackWaitable::PackWaitable(scl::stream* stream) {
+  m_stream = stream;
 }
 
-PackFetchJob::PackFetchJob(Packager* pack, scl::reduce_stream* archive,
-  scl::stream* out, PackIndex indx, int sid) {
-  m_indx    = indx;
-  m_pack    = pack;
-  m_archive = archive;
-  m_out     = out;
-  m_sid     = sid;
+PackIndex::PackIndex(const scl::string* file) : m_file((scl::string*)file) {
+}
+
+PackIndex::PackIndex(PackIndex&& rhs) : m_file(rhs.m_file) {
+  m_wt        = std::move(rhs.m_wt);
+  m_family    = rhs.m_family;
+  m_off       = rhs.m_off;
+  m_size      = rhs.m_size;
+  m_original  = rhs.m_original;
+  m_active    = rhs.m_active;
+  m_submitted = rhs.m_submitted;
+  m_pack      = rhs.m_pack;
+}
+
+PackIndex& PackIndex::operator=(PackIndex&& rhs) {
+  m_wt        = std::move(rhs.m_wt);
+  m_family    = rhs.m_family;
+  m_file      = rhs.m_file;
+  m_off       = rhs.m_off;
+  m_size      = rhs.m_size;
+  m_original  = rhs.m_original;
+  m_active    = rhs.m_active;
+  m_submitted = rhs.m_submitted;
+  m_pack      = rhs.m_pack;
+  return *this;
+}
+
+const scl::string& PackIndex::filepath() const {
+  return *m_file;
+}
+
+PackWaitable& PackIndex::waitable() {
+  return m_wt;
+}
+
+PackIndex& PackIndex::submit() {
+  if(!m_family)
+    return *this;
+  m_family->lock();
+  m_family->m_submitted.push_back(this);
+  m_family->unlock();
+  return *this;
+}
+
+bool PackIndex::open(OpenMode mode, bool binary) {
+  return m_wt->open(*m_file, mode, binary);
+}
+
+scl::stream* PackIndex::stream() {
+  m_wt.wait();
+  return m_wt.m_stream;
+}
+
+bool PackIndex::isactive() const {
+  return m_active;
+}
+
+void PackIndex::release() {
+  if(m_active && !m_wt->is_modified()) {
+    m_active = false;
+    delete &m_wt.stream();
+  }
 }
 
 PackWaitable* PackFetchJob::getWaitable() const {
-  auto* wt = new PackWaitable(m_out);
   // Add the waitable, to the package waitable dicitonary
-  m_pack->m_wts[m_indx.m_file] = wt;
-  return wt;
+  // m_pack->m_wts[m_indx.m_file] = wt;
+  return &m_idx.m_wt;
+}
+
+PackFetchJob::PackFetchJob(PackIndex& idx, Packager& pack)
+    : m_idx(idx), m_pack(pack) {
 }
 
 bool PackFetchJob::checkJob(const jobs::JobWorker& worker) const {
-  size_t           bits = 1llu << m_sid;
+  size_t           bits = 1llu << m_idx.m_pack;
   jobs::JobServer& serv = worker.serv();
   // Is the target stream locked?
   if(serv.hasLockBits(bits))
@@ -4812,143 +5153,354 @@ bool PackFetchJob::checkJob(const jobs::JobWorker& worker) const {
 
 void PackFetchJob::doJob(PackWaitable* wt, const jobs::JobWorker& worker) {
   // Target stream lock bit
-  size_t bits = 1llu << m_sid;
-  m_archive->seek(StreamPos::start, m_indx.m_off);
+  size_t              bits    = 1llu << m_idx.m_pack;
+  scl::reduce_stream* archive = m_pack.m_archives[m_idx.m_pack];
+  scl::stream*        out     = m_idx.m_wt.m_stream;
+  archive->seek(StreamPos::start, m_idx.m_off);
   // Begin decompression stream
-  if(!m_archive->begin(reduce_stream::Decompress))
+  if(!archive->begin(reduce_stream::Decompress))
     return;
-  // Decompress into m_out, with a max byte count of m_indx.m_original
-  m_out->reserve(m_indx.m_original);
-  if(!m_out->write(*m_archive, m_indx.m_original))
+  // Decompress into m_out, with a max byte count of m_idx.m_original
+  out->reserve(m_idx.m_original);
+  if(!out->write(*archive, m_idx.m_original))
     return;
   // Reset modified status, so later code works properly
-  m_out->reset_modified();
+  out->reset_modified();
   // End decompression stream
-  m_archive->end();
-  if(m_out->tell() != m_indx.m_original) {
+  archive->end();
+  if(out->tell() != m_idx.m_original) {
     worker.sync([&]() {
-      printf("Warning: Read underflow for %s\n", m_indx.m_file.cstr());
+      printf("Warning: Read underflow for %s\n", m_idx.m_file->cstr());
       fflush(stdout);
     });
   }
-  // Remove the waitable from the package
-  m_pack->lock();
-  m_pack->m_wts.remove(m_indx.m_file);
-  m_pack->unlock();
   worker.serv().unsetLockBits(bits);
+}
+
+PackWriteJob::PackWriteJob(PackIndex& idx, Packager& pack)
+    : m_idx(idx), m_pack(pack) {
+}
+
+PackWaitable* PackWriteJob::getWaitable() const {
+  m_idx.waitable().wait();
+  m_idx.waitable().reset();
+  return &m_idx.waitable();
+}
+
+void PackWriteJob::doJob(PackWaitable* wt, const jobs::JobWorker& worker) {
+  // Lock the reduce stream
+  scl::reduce_stream* reduce;
+  waitUntil([this, &reduce]() {
+    m_pack.m_remux.lock();
+    bool take = m_pack.m_reduces.size();
+    if(take) {
+      reduce = m_pack.m_reduces.front();
+      m_pack.m_reduces.pop();
+    }
+    m_pack.m_remux.unlock();
+    return take;
+  });
+
+  wt->m_tid = worker.id();
+  if(!wt->m_stream) {
+    wt->m_stream = new scl::stream();
+    wt->m_stream->open(m_idx.filepath(), OpenMode::READ, true);
+  }
+  reduce->seek(StreamPos::start, 0);
+  m_idx->seek(StreamPos::end, 0);
+  // Estimate compressed size, and reserve the space
+  size_t ask = m_idx->tell();
+  // Crude overallocation fix
+  if(reduce->size() > ask * 32)
+    reduce->close();
+  // Allocate src buffer size at minimum
+  if(reduce->size() < ask)
+    reduce->reserve(ask);
+  m_idx->seek(StreamPos::start, 0);
+  reduce->begin(reduce_stream::Compress);
+  reduce->write(*wt->m_stream, ask);
+  reduce->end();
+  // Update index
+  m_idx.m_size     = reduce->tell();
+  m_idx.m_original = ask;
+  wt->m_stream->close();
+  delete wt->m_stream;
+  wt->m_stream = reduce;
+  if(!wt->m_stream) {
+    throw "wtf";
+  }
+  m_idx.m_active = false;
+}
+
+Packager::Packager(int nworkers) : m_serv(nworkers) {
+  m_workers = m_serv.workerCount();
+  m_waiting = 0;
 }
 
 Packager::~Packager() {
   close();
 }
 
-bool Packager::open(const scl::path& path) {
-  scl::stream pack;
-  if(!path.exists()) {
-    if(!pack.open(path, OpenMode::RWTRUNC, true))
-      return false;
-  } else {
-    if(!pack.open(path, OpenMode::RW, true))
-      return false;
-  }
-  pack.seek(StreamPos::start, 0);
-  char   header[SPK_HEADER_SIZE];
-  size_t read = pack.read(header, sizeof(header));
-  if(read < SPK_HEADER_SIZE) {
-    // New archive
-    pack.seek(StreamPos::start, 0);
-    m_archive = std::move(pack);
-    return true;
-  }
-  if(strncmp(header, SPK_MAGIC, sizeof(SPK_MAGIC) - 1) != 0) {
-    // Not a spk archive
+bool Packager::readIndex(scl::reduce_stream& archive, uint32_t bid) {
+  uint32_t off;
+  uint8_t  header[SPK_HEADER_SIZE];
+  archive.seek(StreamPos::start, 0);
+  archive.read(header, SPK_HEADER_SIZE);
+  if(header[SPK_H_MAJOR] != SPK_MAJOR) {
+    fprintf(stderr, "Pack version mismatch. Will not proceed.\n");
     return false;
   }
-  // Load index offset
-  memcpy(&m_ioff, header + SPK_IOFF, sizeof(m_ioff));
-  if(m_ioff) {
-    pack.seek(StreamPos::start, m_ioff);
-    scl::string content;
-    pack >> content;
-    xml::XmlDocument doc;
-    xml::XmlResult   ret = doc.load_string<xml::speed_optimze>(content);
-    if(!ret) {
-      // TODO: replace with proper logging eventually
-      fprintf(stderr, "Failed to index spk archive. reason: %s\n",
-        ret.what().cstr());
-      return false;
-    }
-    if(doc.tag() != "SPK") {
-      // Malformed
-      return false;
-    }
-    // Load file index
-    for(auto c : doc.children()) {
-      if(c->tag() == "file") {
-        PackIndex indx;
-        auto*     name     = c->find_attr("name");
-        auto*     off      = c->find_attr("off");
-        auto*     size     = c->find_attr("size");
-        auto*     original = c->find_attr("original");
-        if(!name || !off || !size || !original) {
-          // Malformed
-          continue;
-        }
-        indx.m_file          = name->data().copy();
-        indx.m_off           = off->data_int();
-        indx.m_size          = size->data_int();
-        indx.m_original      = original->data_int();
-        m_index[indx.m_file] = indx;
-      }
-    }
+  // Check if pack is within member bounds, and has the same build id
+  if(header[SPK_H_MID] >= header[SPK_H_NMEMBS] ||
+     *(uint32_t*)&header[SPK_H_BID] != bid) {
+    fprintf(stderr,
+      "Skipping pack that is not a member of this pack family.\n");
+    return true;
   }
-  // Skip checking version for now
-  m_archive = std::move(pack);
+  off = *(uint32_t*)&header[SPK_H_IOFF];
+
+  archive.seek(StreamPos::start, off);
+  while(true) {
+    PackIndex idx;
+    uint16_t  len;
+    archive.read(&len, 2);
+    if(!len)
+      break;
+    char* buf  = new char[len + 1];
+    buf[len]   = 0;
+    idx.m_file = new scl::path();
+    archive.read(buf, len);
+    idx.m_file->claim(buf);
+    archive.read(&idx.m_off, 4);
+    archive.read(&idx.m_size, 4);
+    archive.read(&idx.m_original, 4);
+    idx.m_pack = header[SPK_H_MID];
+    if(!idx.m_off || !idx.m_size || !idx.m_original) {
+      // malformed
+      delete idx.m_file;
+      continue;
+    }
+    if(m_index[*idx.m_file] != m_index.end()) {
+      fprintf(stderr, "duplicate file entry (%s) in pack\n",
+        idx.m_file->cstr());
+      delete idx.m_file;
+      continue;
+    }
+    m_index[*idx.m_file] = std::move(idx);
+  }
   return true;
 }
 
-PackWaitable& Packager::openFile(const path& path) {
-  lock();
-  auto ia = m_activ[path];
-  if(ia != m_activ.end()) {
-    // The file is active, so just return that
-    auto* wt = new PackWaitable(&ia.value());
-    wt->complete();
-    unlock();
-    return *wt;
-  } else {
-    // Check if it is indexed, if so, fetch. If not, add new entry to m_activ.
-    auto ii = m_index[path];
-    // New active entry is added either way.
-    ia = scl::stream();
-    if(ii != m_index.end()) {
-      // File is indexed, fetch it.
-      auto& wt = g_serv.submitJob(
-        new PackFetchJob(this, &m_archive, &ia.value(), ii.value(), 0));
-      // m_wts[path] = &wt;
-      unlock();
-      return wt;
-    } else {
-      // New empty active entry, so return active entry
-      auto* wt = new PackWaitable(&ia.value());
-      wt->complete();
-      // m_wts[path] = wt;
-      unlock();
-      return *wt;
+bool Packager::open(const scl::path& path) {
+  m_ext    = path.extension();
+  m_family = path;
+  m_family.replaceExtension("");
+  m_serv.slow();
+  m_serv.start();
+  if(path.exists()) {
+    char                header[SPK_HEADER_SIZE];
+    scl::reduce_stream* arc = new scl::reduce_stream();
+    arc->open(path, OpenMode::READ);
+    arc->read(header, SPK_HEADER_SIZE);
+    if(header[SPK_H_MAJOR] != SPK_MAJOR) {
+      fprintf(stderr, "Pack version mismatch. Will not proceed.\n");
+      arc->close();
+      return false;
+    }
+    uint32_t bid = *(uint32_t*)&header[SPK_H_BID];
+    if(!readIndex(*arc, bid)) {
+      arc->close();
+      return false;
+    }
+    m_archives.reserve(header[SPK_H_NMEMBS]);
+    m_archives.push_back(arc);
+    // Find member packs
+    auto mpacks = scl::path::glob(
+      scl::string::fmt("%s_*%s", m_family.cstr(), m_ext.cstr()));
+
+    if(mpacks.size() < header[SPK_H_NMEMBS] - 1) {
+      fprintf(stderr, "One or more packs are missing.\n");
+      close();
+      return false;
+    }
+
+    for(auto& i : mpacks) {
+      scl::reduce_stream* arc = new scl::reduce_stream();
+      arc->open(i, OpenMode::READ);
+      if(!arc->is_open())
+        continue;
+      if(!readIndex(*arc, bid)) {
+        arc->close();
+        continue;
+      }
+      m_archives.push_back(arc);
+    }
+
+    if(m_archives.size() < header[SPK_H_NMEMBS]) {
+      fprintf(stderr, "One or more packs failed to be opened.\n");
+      close();
+      return false;
     }
   }
+  m_open = true;
+  return true;
 }
 
-std::vector<PackWaitable*> Packager::openFiles(
-  const std::vector<scl::path>& files) {
-  std::vector<PackWaitable*> waitables;
-  for(auto& i : files) {
-    waitables.push_back(&openFile(i));
+PackIndex* Packager::openFile(const path& path) {
+  // Syncronous, cause it gotta be. (its cheap-ish).
+  lock();
+  auto idx = m_index[path];
+  if(idx == m_index.end() || !idx->m_size) {
+    // File does not exist in index, so make a new active one.
+    idx = std::move(PackIndex());
+    PackIndex nidx(&idx.key());
+    nidx.m_wt = PackWaitable(nullptr);
+    nidx.m_wt.complete();
+    nidx.m_family = this;
+    nidx.m_active = true;
+    idx           = std::move(nidx);
+    unlock();
+    return &idx.value();
+  } else if(idx->m_active) {
+    // Active file. Do nothing.
+    unlock();
+    return &idx.value();
+  } else {
+    // File is indexed, but not active.
+    idx->m_wt     = PackWaitable(new scl::stream());
+    idx->m_active = true;
+#if 1
+    auto& wt = m_serv.submitJob(new PackFetchJob(idx.value(), *this));
+#endif
+    unlock();
+    return &idx.value();
   }
-  return waitables;
 }
 
-bool Packager::write() {
+std::vector<PackIndex*> Packager::openFiles(
+  const std::vector<scl::path>& files) {
+  std::vector<PackIndex*> indices;
+  for(auto& i : files) {
+    indices.push_back(openFile(i));
+  }
+  return indices;
+}
+
+bool Packager::submit(const scl::path& path) {
+  lock();
+  auto idx = m_index[path];
+  if(idx != m_index.end()) {
+    m_submitted.push_back(&idx.value());
+    unlock();
+    return true;
+  }
+  unlock();
+  return false;
+}
+
+Packager::mPackRes Packager::writeMemberPack(scl::stream& archive,
+  size_t& elemid, int memberid, const scl::string& buildid,
+  std::function<void(size_t, PackIndex*)>& cb) {
+  scl::path outpath;
+  if(!memberid)
+    outpath = scl::string::fmt("%s%s", m_family.cstr(), m_ext.cstr());
+  else
+    outpath =
+      scl::string::fmt("%s_%i%s", m_family.cstr(), memberid, m_ext.cstr());
+
+  archive.open(outpath, OpenMode::RWTRUNC, true);
+
+  // Setup and write pack header
+  char header[SPK_HEADER_SIZE];
+  memset(header, 0, sizeof(header));
+  memcpy(header, SPK_MAGIC, 4);
+  header[SPK_H_MAJOR] = SPK_MAJOR;
+  header[SPK_H_MINOR] = SPK_MINOR;
+  header[SPK_H_MID]   = memberid;
+  memcpy(&header[SPK_H_BID], buildid.cstr(), 4);
+  archive.write(header, SPK_HEADER_SIZE);
+
+  size_t      itabsize = 0;
+  scl::stream itab;
+  size_t      off     = SPK_HEADER_SIZE;
+  mPackRes    res     = mPackRes::OK;
+  bool        written = false;
+  for(; elemid < m_submitted.size(); elemid++) {
+    // Grab the front of the async queue
+    auto* aidx = m_writing.front();
+    // Wait for it
+    if(!aidx->waitable().wait(15)) {
+      fprintf(stderr, "Time out\n");
+    }
+    // Set syncronous index info
+    aidx->m_off = off;
+    // Grab the reduce stream from the waitable
+    scl::reduce_stream* reduce = (scl::reduce_stream*)aidx->m_wt.m_stream;
+    reduce->seek(StreamPos::start, 0);
+    // itab entry size estimation
+    // 2 path length, 4*3 for offset, size, and original size
+    uint16_t newitab = 14 + aidx->m_file->len();
+    // check for pack overflow before writing
+    if(off + aidx->m_size + itabsize + newitab >= SPK_MAX_PACK_SIZE) {
+// Overflow
+#if 0
+      fprintf(stderr,
+        "Overflow!\n%s\nCursize: %zu\nEstsize: %zu\npacked: %u\n\n\n\n\n\n\n",
+        aidx->m_file->cstr(), off, off + aidx->m_size + itabsize + newitab,
+        aidx->m_size);
+#endif
+      if(written)
+        // Overflow so a new member can be made.
+        res = mPackRes::WOVERFLOW;
+      else {
+        // first file to be written causes overflow
+        // there is no recourse for this, so error.
+        fprintf(stderr, "file %s is too big to be written\n",
+          aidx->m_file->cstr());
+        res = mPackRes::GENERAL_ERROR;
+      }
+      break;
+    }
+    if(cb)
+      cb(elemid, aidx);
+    aidx->m_wt.m_stream = nullptr;
+    // Write compressed content
+    archive.write(reduce->data(), aidx->m_size, 1, false);
+    m_remux.lock();
+    m_reduces.push(reduce);
+    m_remux.unlock();
+    uint16_t filelen = aidx->m_file->len();
+    // Write itab entry;
+    itab.write(&filelen, 2, SCL_STREAM_BUF);
+    itab.write(*aidx->m_file);
+    itab.write(&aidx->m_off, 4);
+    itab.write(&aidx->m_size, 4);
+    itab.write(&aidx->m_original, 4);
+    m_writing.pop();
+    if(elemid + m_workers < m_submitted.size()) {
+      m_serv.submitJob(
+        new PackWriteJob(*m_submitted[elemid + m_workers], *this));
+      m_writing.push(m_submitted[elemid + m_workers]);
+    }
+    // Update info
+    off += aidx->m_size;
+    itabsize += newitab;
+    written = true;
+  }
+  // Write itab endstop
+  uint16_t zero = 0;
+  itab.write(&zero, 2);
+  itabsize += 2;
+  // Write itab at the end of the archive
+  itab.seek(StreamPos::start, 0);
+  archive.write(itab, itabsize);
+  // Write itab offset in the archive header
+  archive.seek(StreamPos::start, SPK_H_IOFF);
+  archive.write(&off, 4);
+  return res;
+}
+
+bool Packager::write(std::function<void(size_t, PackIndex*)> cb) {
   const char maversion = 1;
   const char miversion = 0;
 
@@ -4958,89 +5510,50 @@ bool Packager::write() {
     throw "SPK only configured for little endian systems";
   }
 
-  if(!m_archive.is_open())
+  if(!m_open)
     return false;
 
   lock();
-  if(!m_ioff) {
-    // New archive
-    char header[SPK_HEADER_SIZE];
-    memset(header, 0, sizeof(header));
-    memcpy(header, SPK_MAGIC, 4);
-    memcpy(header + 4, &maversion, 1);
-    memcpy(header + 5, &miversion, 1);
-    m_archive.seek(StreamPos::start, 0);
-    m_archive.write_uncompressed(header, sizeof(header));
-    m_ioff = SPK_HEADER_SIZE;
+  // Get semi-unique build id for this family
+  scl::string               buildid = scl::string::rand(4);
+  std::vector<scl::stream*> archives;
+  scl::stream               archive;
+  size_t                    elem = 0;
+  int                       mid  = 0;
+  // Prepare the job server
+  m_serv.clearjobs();
+  m_serv.waitidle();
+  m_serv.slow(false);
+  // Prepare reduce streams
+  for(int i = 0; i < m_workers; i++)
+    m_reduces.push(new scl::reduce_stream());
+  // Queue up the first few files i=threadid, j=elemid
+  for(int i = 0, j = 0; i < m_workers && j < m_submitted.size(); j++) {
+    // Skip if inactive
+    m_serv.submitJob(new PackWriteJob(*m_submitted[j], *this));
+    m_writing.push(m_submitted[j]);
+    // Inc thread id
+    i++;
   }
-
-  size_t aoff = m_ioff;
-  m_archive.seek(StreamPos::start, aoff);
-
-  xml::XmlDocument doc;
-  doc.set_tag(doc, "SPK");
-
-  for(const auto& i : m_index) {
-    auto ia = m_activ[i.key()];
-    if(ia != m_activ.end()) {
-      if(ia->is_modified())
-        continue;
-      else
-        m_activ.remove(i.key());
-    }
-    xml::XmlElem* e = doc.new_elem("file");
-    e->add_attr(doc.new_attr("name", i.key()));
-    e->add_attr(doc.new_attr("off", scl::string::fmt("%lli", i->m_off)));
-    e->add_attr(doc.new_attr("size", scl::string::fmt("%lli", i->m_size)));
-    e->add_attr(
-      doc.new_attr("original", scl::string::fmt("%lli", i->m_original)));
-    doc.add_child(e);
+  archives.push_back(new scl::stream());
+  while(writeMemberPack(*archives[mid], elem, mid, buildid, cb) ==
+        mPackRes::WOVERFLOW) {
+    mid++;
+    archives.push_back(new scl::stream());
   }
+  m_submitted.resize(0);
+  m_serv.slow();
 
-  for(const auto& i : m_activ) {
-    size_t srcSize = i->seek(StreamPos::end, 0);
-    if(!srcSize)
-      continue;
-    i->seek(StreamPos::start, 0);
-    m_archive.begin(reduce_stream::Compress);
-    if(!m_archive.write(i.value(), srcSize)) {
-      // TODO use an updated logging method
-      fprintf(stderr, "Failed to compress file\n");
-      m_archive.end();
-      m_archive.seek(StreamPos::start, aoff);
-      continue;
-    }
-    m_archive.end();
-    size_t        outSize = m_archive.tell() - aoff;
-
-    xml::XmlElem* e       = doc.new_elem("file");
-    e->add_attr(doc.new_attr("name", i.key()));
-    e->add_attr(doc.new_attr("off", scl::string::fmt("%lli", aoff)));
-    e->add_attr(doc.new_attr("size", scl::string::fmt("%lli", outSize)));
-    e->add_attr(doc.new_attr("original", scl::string::fmt("%lli", srcSize)));
-    doc.add_child(e);
-
-
-    // Add the written file to the index
-    PackIndex indx;
-    indx.m_file      = i.key();
-    indx.m_off       = aoff;
-    indx.m_size      = outSize;
-    indx.m_original  = srcSize;
-    m_index[i.key()] = indx;
-
-    aoff += outSize;
+  const uint8_t nmems = mid + 1;
+  for(auto i : archives) {
+    i->seek(StreamPos::start, SPK_H_NMEMBS);
+    i->write(&nmems, 1);
+    i->close();
+    delete i;
   }
-
-  m_ioff = aoff;
-  m_archive.seek(StreamPos::start, SPK_IOFF);
-  m_archive.write_uncompressed(&aoff, sizeof(aoff));
-
-  m_archive.seek(StreamPos::start, aoff);
-  scl::stream stream = std::move(m_archive);
-  doc.print(stream, false);
-  m_archive = std::move(stream);
+  archives.clear();
   unlock();
+  close();
   return true;
 }
 
@@ -5048,34 +5561,49 @@ const scl::dictionary<PackIndex>& Packager::index() {
   return m_index;
 }
 
+PackIndex* Packager::operator[](const scl::string& path) {
+  auto idx = m_index[path];
+  if(idx == m_index.end())
+    return nullptr;
+  return &idx.value();
+}
+
 void Packager::close() {
   lock();
-  // Wait for all the unfinished waitables, so they dont error
-  if(m_wts.size()) {
-    for(auto i = m_wts.begin(); i != m_wts.end(); i = m_wts.begin()) {
-      auto* wt = i.value();
-      unlock();
-      wt->wait();
-      lock();
+  m_family = path();
+  m_ext    = string();
+  m_serv.clearjobs();
+  m_serv.stop();
+  for(auto& i : m_archives) {
+    if(i)
+      delete i;
+  }
+  m_archives.clear();
+  while(m_reduces.size()) {
+    delete m_reduces.front();
+    m_reduces.pop();
+  }
+  for(auto& i : m_index) {
+    if(i->m_active) {
+      i->m_wt->close();
+      delete &i->m_wt.stream();
     }
   }
-  m_family = path();
-  m_dir    = path();
-  m_archive.close();
   m_index.clear();
-  m_activ.clear();
-  m_ioff = 0;
+  m_submitted.clear();
+  m_waiting = 0;
+  m_open    = false;
   unlock();
 }
 
 bool packInit() {
-  g_serv.slow();
-  g_serv.start();
+  // g_serv.slow();
+  // g_serv.start();
   return true;
 }
 
 void packTerminate() {
-  g_serv.stop();
+  // g_serv.stop();
 }
 } // namespace pack
 } // namespace scl
@@ -5844,11 +6372,11 @@ LZ4FLIB_STATIC_API LZ4F_CDict* LZ4F_createCDict_advanced(LZ4F_CustomMem customMe
 
 
 static const LZ4F_preferences_t kPrefs = {
-  {LZ4F_max64KB, LZ4F_blockLinked, LZ4F_contentChecksumEnabled, LZ4F_frame,
+  {LZ4F_max1MB, LZ4F_blockLinked, LZ4F_contentChecksumEnabled, LZ4F_frame,
     0 /* unknown content size */, 0 /* no dictID */, LZ4F_noBlockChecksum},
-  2,         /* compression level; 0 == default */
+  0,         /* compression level; 0 == default */
   0,         /* autoflush */
-  0,         /* favor decompression speed */
+  1,         /* favor decompression speed */
   {0, 0, 0}, /* reserved, must be set to 0 */
 };
 
@@ -5896,7 +6424,7 @@ size_t reduce_stream::compress_flush() {
   if(LZ4F_isError(outSize)) {
     return -1;
   }
-  if(!write_internal(m_outbuf, outSize, 1))
+  if(!write_internal(m_outbuf, outSize, SCL_STREAM_BUF))
     return -1;
   return outSize;
 }
@@ -5915,7 +6443,7 @@ size_t reduce_stream::compress_chunk(const void* buf, size_t bytes,
   if(LZ4F_isError(outSize)) {
     return 0;
   }
-  if(!write_internal(m_outbuf, outSize, 1))
+  if(!write_internal(m_outbuf, outSize, SCL_STREAM_BUF))
     return -1;
 
   if(flush)
@@ -5931,7 +6459,7 @@ bool reduce_stream::compress_begin() {
   if(LZ4F_isError(headerSize)) {
     return false;
   }
-  if(!write_internal(m_outbuf, headerSize, 1)) {
+  if(!write_internal(m_outbuf, headerSize, SCL_STREAM_BUF)) {
     return false;
   }
   return true;
@@ -5943,7 +6471,7 @@ bool reduce_stream::compress_end() {
   if(LZ4F_isError(outSize)) {
     return false;
   }
-  write_internal(m_outbuf, outSize, 1);
+  write_internal(m_outbuf, outSize, SCL_STREAM_BUF);
   return true;
 }
 
@@ -6143,8 +6671,10 @@ bool reduce_stream::end() {
 }
 
 long long reduce_stream::read(void* buf, size_t n) {
-  if(!m_ready || m_mode != Decompress)
-    return 0;
+  if(!m_ready || m_mode != Decompress) {
+    // Non-decompress read mode returns compressed data
+    return read_internal(buf, n);
+  }
   if(m_outSize > m_outCapacity || m_outConsumed > m_outCapacity)
     return 0;
   if(m_outConsumed < m_outSize) {
