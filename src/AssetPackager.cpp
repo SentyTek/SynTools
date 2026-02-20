@@ -83,7 +83,12 @@ bool AssetPackager::CreateFileBundle(const std::vector<std::string>& files,
             if (ec) { // Fallback to filename only
                 rel = fullpath.filename();
             }
-            entries.push_back(scl::path(rel.string().c_str()));
+            scl::string normalized =
+                scl::path(rel.string().c_str())
+                    .replace(
+                        "\\",
+                        "/"); // Normalize to forward slashes for the archive
+            entries.push_back(normalized);
         };
         
         // Since 'file' may be a dir, we need to check and add all files
@@ -132,7 +137,7 @@ bool AssetPackager::CreateFileBundle(const std::vector<std::string>& files,
     pack.open(output);
 
     // Validate package
-    auto index = pack.index();
+    auto& index = pack.index();
 
     if (index.size() != entries.size()) {
         std::cout << "Package validation failed." << std::endl;
@@ -166,16 +171,17 @@ void AssetPackager::ValidatePackage(const std::string& packagePath) {
         return;
     }
 
-    auto index = pack.index();
+    auto& index = pack.index();
     int  totalSize = 0;
     int  totalOriginal = 0;
     std::cout << "Package contains " << index.size() << " files:" << std::endl;
-    for (const auto& entry : index) {
-        totalSize += entry->compressed();
-        totalOriginal += entry->original();
-        std::cout << " - " << entry->filepath().cstr() << " (" << entry->compressed()
-                  << " / " << entry->original() << " bytes) "
-                  << (int)((double)entry->compressed() / (double)entry->original() * 100.0)
+    for (const auto& pair : index) {
+        const auto& entry = pair.second;
+        totalSize += entry.compressed();
+        totalOriginal += entry.original();
+        std::cout << " - " << entry.filepath().cstr() << " (" << entry.compressed()
+                  << " / " << entry.original() << " bytes) "
+                  << (int)((double)entry.compressed() / (double)entry.original() * 100.0)
                   << "% compressed)" << std::endl;
     }
 
