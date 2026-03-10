@@ -28,8 +28,9 @@ bool AssetPackager::CreateFileBundle(const std::vector<std::string>& files,
     std::vector<scl::path> entries; // Relative paths
     std::vector<scl::path> diskPaths; // Absolute disk paths
 
-    // Set output path to absolute before changing working dir, so it can be relative to execPath if needed
-    scl::path output(fs::weakly_canonical(fs::path(outputPath)).c_str());
+    // Set output path to absolute before changing working dir, so it can be
+    // relative to execPath if needed
+    scl::path output(fs::weakly_canonical(fs::path(outputPath)).string().c_str());
 
     fs::path baseDir = fs::current_path();
     for (const std::string& option : options) {
@@ -171,6 +172,7 @@ void AssetPackager::ValidatePackage(const std::string& packagePath) {
         return;
     }
 
+#if 1
     auto& index = pack.index();
     int  totalSize = 0;
     int  totalOriginal = 0;
@@ -191,6 +193,7 @@ void AssetPackager::ValidatePackage(const std::string& packagePath) {
 
     std::cout << "Package validated successfully." << std::endl;
     pack.close();
+#endif
     return;
 }
 }; // namespace SynTools
