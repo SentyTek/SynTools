@@ -1,4 +1,4 @@
-name: Syngine Tools CI
+name: SynTools CI
 
 on:
   push:
@@ -11,38 +11,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            build_type: Debug
-            run_tests: false
-            full: true
-
-          - os: windows-latest
-            build_type: Debug
-            run_tests: false
-            full: true
-
-          - os: macos-latest
-            build_type: Debug
-            run_tests: false
-            full: true
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        build_type: [Debug]
 
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Set up CMake
-        uses: lukka/get-cmake@v3
+      - name: Setup CMake and Ninja
+        uses: lukka/get-cmake@latest
         with:
-          cmake-version: "3.27.0"
+          cmakeVersion: "3.27.0"
+          ninjaVersion: "latest"
 
-      - name: Install Ninja
-        uses: seanmiddleditch/gha-setup-ninja@v3
+      - name: Configure SynTools
+        run: cmake -S . -B build-tools -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
-      - name: Configure CMake
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-
-      - name: Build
-        run: cmake --build build --config ${{ matrix.build_type }} --target all
-  
+      - name: Build syntools only
+        run: cmake --build build-tools --target syntools --parallel
