@@ -1,0 +1,48 @@
+name: Syngine Tools CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            build_type: Debug
+            run_tests: false
+            full: true
+
+          - os: windows-latest
+            build_type: Debug
+            run_tests: false
+            full: true
+
+          - os: macos-latest
+            build_type: Debug
+            run_tests: false
+            full: true
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up CMake
+        uses: lukka/get-cmake@v3
+        with:
+          cmake-version: "3.27.0"
+
+      - name: Install Ninja
+        uses: seanmiddleditch/gha-setup-ninja@v3
+
+      - name: Configure CMake
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+
+      - name: Build
+        run: cmake --build build --config ${{ matrix.build_type }} --target all
+  
