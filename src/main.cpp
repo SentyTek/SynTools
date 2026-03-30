@@ -3,7 +3,7 @@
 // │ Created 2026-01-30                   │
 // ├──────────────────────────────────────┤
 // │ Copyright (c) SentyTek 2025-2026     │
-// │ Placeholder License                  │
+// | Licensed under the MIT License       |
 // ╰──────────────────────────────────────╯
 
 #define SYNGINE_TOOL_VERSION "1"
