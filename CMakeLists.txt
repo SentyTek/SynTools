@@ -13,10 +13,11 @@ set(CMAKE_CXX_STANDARD 20)
 set(SYNTOOLS_SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/src CACHE STRING "SynTools source dir" FORCE)
 
 add_executable(syntools)
+set_target_properties(syntools PROPERTIES FOLDER "Tools")
+set_target_properties(syntools PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/$<CONFIGURATION>/tools")
 
 target_sources(syntools PRIVATE
     ${SYNTOOLS_SOURCE_DIR}/main.cpp
     ${SYNTOOLS_SOURCE_DIR}/ShaderCompiler.cpp
     ${SYNTOOLS_SOURCE_DIR}/AssetPackager.cpp
 )
-
