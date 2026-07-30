@@ -31,9 +31,17 @@ CLI tools used to help make game development with Syngine and Syngine Studio eas
 - Shader extension is `.shadercode`
 - Note the replacement of the vertex and output with `s` (means "same"). If either of these are `s`, it will assume the vertex and/or output names are the same as the fragment's name.
 
+## Shader metadata generation
+An important part of Syngine is its automatic shader reflection. This is done with this tool.
+`syntools shadermeta <path_to_shader_dir> [options]`
+- Note that the path is a path to a dir, not to a file. It will generate all the metadata for a whole folder of shaders and the intent is this generated meta.xml file will always be packaged with the bundle.
+
+### Options:
+`--output=<path>` Specify where the `meta.xml` file is placed.
+
 ## File bundling
 `syntools pack <output_file> <file1> <file2> ... [options]`
-- Note that`file` can be a relative path to either a literal file, or to a directory, where every file in said dir (non-recursive) will be packaged.
+- Note that `file` can be a relative path to either a literal file, or to a directory, where every file in said dir (non-recursive) will be packaged.
 
 ### Options:
 `--src-dir=<path>` Path where every file/directory will then be searched from. Very useful for the relative asset paths inside the game. e.g. `--src-dir=./Bakerman.app/Contents/Resources` with `file1` being `shaders` will look for files in src-dir/shaders. This is useful for multi-platform development, as keeping relative paths in the package is essential.

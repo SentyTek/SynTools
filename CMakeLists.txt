@@ -20,4 +20,5 @@ target_sources(syntools PRIVATE
     ${SYNTOOLS_SOURCE_DIR}/main.cpp
     ${SYNTOOLS_SOURCE_DIR}/ShaderCompiler.cpp
     ${SYNTOOLS_SOURCE_DIR}/AssetPackager.cpp
+    ${SYNTOOLS_SOURCE_DIR}/ShaderMeta.cpp
 )
