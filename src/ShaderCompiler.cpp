@@ -3,7 +3,7 @@
 // │ Created 2026-01-30                   │
 // ├──────────────────────────────────────┤
 // │ Copyright (c) SentyTek 2025-2026     │
-// | Licensed under the MIT License       |
+// │ Licensed under the MIT License       │
 // ╰──────────────────────────────────────╯
 
 #include "ShaderCompiler.hpp"
@@ -25,25 +25,27 @@ bool ShaderCompiler::CompileShader(std::string                     fragmentPath,
 #else
     std::string compilerPath = "./shaderc"; // Default shader compiler path
 #ifdef __APPLE__
-    std::string profile = "metal";
+    std::string profile  = "metal";
     std::string platform = "osx";
 #else
-    std::string profile = "spirv";
+    std::string profile  = "spirv";
     std::string platform = "linux";
 #endif
 #endif
-    std::string srcDir = "../../assets/shaders/";
+    std::string srcDir       = "../../assets/shaders/";
     std::string varying      = fragmentPath + ".vary";
     std::string srcExtension = ".sc";
     std::string outExtension = ".bin";
     std::string includes = "-i ../../engine/third_party/bgfx.cmake/bgfx/src/";
-    // Frankly, I don't care about code cleanliness here - this is a tool (A bit like myself, but anyway...)
+    // Frankly, I don't care about code cleanliness here - this is a tool (A bit
+    // like myself, but anyway...)
     for (const auto& option : options) {
         if (option.rfind("--compiler=", 0) == 0) {
             compilerPath = option.substr(11);
-        } /*else if (option.rfind("--platform=", 0) == 0) { // Only allow platform to be set by OS currently
-            platform = option.substr(11);
-        }*/ else if (option.rfind("--varying=", 0) == 0) {
+        } /*else if (option.rfind("--platform=", 0) == 0) { // Only allow
+        platform to be set by OS currently platform = option.substr(11);
+        }*/
+        else if (option.rfind("--varying=", 0) == 0) {
             varying = option.substr(10);
         } else if (option.rfind("--src-ext=", 0) == 0) {
             srcExtension = option.substr(10);
@@ -81,7 +83,8 @@ bool ShaderCompiler::CompileShader(std::string                     fragmentPath,
         " --platform " + platform + " --type v" + " --varyingdef " + srcDir +
         "varying/" + varying + srcExtension + " " + includes;
 
-    std::cout << "Compiling vertex shader with command: " << vertCommand << std::endl;
+    std::cout << "Compiling vertex shader with command: " << vertCommand
+              << std::endl;
     int vertResult = std::system(vertCommand.c_str());
     if (vertResult != 0) {
         return false;
@@ -94,13 +97,14 @@ bool ShaderCompiler::CompileShader(std::string                     fragmentPath,
         " -o " + outputPath + ".frag" + outExtension + " -p " + profile +
         " --platform " + platform + " --type f" + " --varyingdef " + srcDir +
         "varying/" + varying + srcExtension + " " + includes;
-    
-    std::cout << "Compiling fragment shader with command: " << fragCommand << std::endl;
+
+    std::cout << "Compiling fragment shader with command: " << fragCommand
+              << std::endl;
     int fragResult = std::system(fragCommand.c_str());
     if (fragResult != 0) {
         return false;
     }
-    
+
     return true;
 }
 
@@ -112,9 +116,11 @@ void ShaderCompiler::PrintHelp() {
     std::cout << "  --compiler=<path>     Path to shader compiler executable, "
                  "relative to program"
                  "(default: shaderc)\n";
-    //std::cout << "  --platform=<platform> Target platform (default: dx12 on win32, metal on macOS, spirv on others)\n";
+    // std::cout << "  --platform=<platform> Target platform (default: dx12 on
+    // win32, metal on macOS, spirv on others)\n";
     std::cout << "  --varying=<path>      Path to varying definitions file\n";
-    std::cout << "  --src-ext=<ext>       Source file extension (default: .sc)\n";
+    std::cout
+        << "  --src-ext=<ext>       Source file extension (default: .sc)\n";
     std::cout
         << "  --out-ext=<ext>       Output file extension (default: .bin)\n";
     std::cout << "  --src-dir=<dir>       Source directory for shaders, "
@@ -140,7 +146,6 @@ void ShaderCompiler::PrintHelp() {
     std::cout << "\tCompiles 'lighting_vert.vert.sc' and "
                  "'lighting.frag.sc' from './my_shaders/' using the varying "
                  "definitions in './my_shaders/varying/lighting_varying.sc'.\n";
-    
 }
 
 } // namespace SynTools
