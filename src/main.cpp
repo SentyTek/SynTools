@@ -6,10 +6,11 @@
 // │ Licensed under the MIT License       │
 // ╰──────────────────────────────────────╯
 
-#define SYNGINE_TOOL_VERSION "2"
+#define SYNGINE_TOOL_VERSION "3"
 
 #include "AssetPackager.hpp"
 #include "ShaderCompiler.hpp"
+#include "AssetBuilder.hpp"
 #include "ShaderMeta.hpp"
 
 #include <iostream>
@@ -20,6 +21,10 @@ void printHelp() {
     std::cout << "Commands:\n";
     std::cout << "  shader | s         Compile shaders\n";
     std::cout << "  pack | p           Compress & package game files\n";
+    std::cout << "  pack-tree | pt     Bundle a directory tree, one bundle per "
+                 "top-level subdirectory\n";
+    std::cout
+        << "  build-assets | ba   Build all assets from specified paths\n";
     std::cout << "  validate | v       Validate a packaged asset bundle\n";
     std::cout << "  shadermeta | sm    Generate shader metadata for an entire "
                  "shader directory. Generates one meta.xml for the entire "
@@ -69,7 +74,7 @@ int main(int argc, char** argv) {
         if (argc < 3 || std::string(argv[2]) == "--help" ||
             std::string(argv[2]) == "-h") {
             SynTools::AssetPackager packager;
-            packager.PrintHelp();
+            packager.PrintHelpPack();
             return 0;
         }
         std::string              outputPath = argv[2];
@@ -91,15 +96,45 @@ int main(int argc, char** argv) {
             return 1;
         }
         std::cout << "Asset(s) packaged successfully." << std::endl;
+    } else if (command == "pack-tree" || command == "pt") {
+        if (argc < 4 || std::string(argv[2]) == "--help" ||
+            std::string(argv[2]) == "-h") {
+            SynTools::AssetPackager packager;
+            packager.PrintHelpTree();
+            return 0;
+        }
+        std::string              inputPath  = argv[2];
+        std::string              outputPath = argv[3];
+        std::vector<std::string> options;
+        for (int i = 4; i < argc; ++i) {
+            options.push_back(argv[i]);
+        }
+        SynTools::AssetPackager packager;
+        bool success = packager.PackTree(inputPath, outputPath, options);
+        if (!success) {
+            std::cerr << "Asset tree packaging failed." << std::endl;
+            return 1;
+        }
+        std::cout << "Asset tree packaged successfully." << std::endl;
     } else if (command == "validate" || command == "v") {
         if (argc < 3 || std::string(argv[2]) == "--help" ||
             std::string(argv[2]) == "-h") {
-            std::cout << "Usage: syngine_tools validate <package_path>\n";
+            std::cout << "Usage: syntools validate <package_path>\n";
             return 0;
         }
         std::string             packagePath = argv[2];
         SynTools::AssetPackager packager;
         packager.ValidatePackage(packagePath);
+    } else if (command == "view") {
+        if (argc < 4 || std::string(argv[2]) == "--help" ||
+            std::string(argv[2]) == "-h") {
+            std::cout << "Usage: syntools view <package_path> <asset>\n";
+            return 0;
+        }
+        std::string             packagePath = argv[2];
+        std::string             asset       = argv[3];
+        SynTools::AssetPackager packager;
+        packager.ViewAsset(packagePath, asset);
     } else if (command == "shadermeta" || command == "sm") {
         if (argc < 3 || std::string(argv[2]) == "--help" ||
             std::string(argv[2]) == "-h") {
@@ -118,6 +153,21 @@ int main(int argc, char** argv) {
             return 1;
         }
         std::cout << "Shader metadata generated successfully." << std::endl;
+    } else if (command == "build-assets" || command == "ba") {
+        if (argc < 5 || std::string(argv[2]) == "--help" ||
+            std::string(argv[2]) == "-h") {
+            std::cout << "Usage: syntools build-assets <project_path> "
+                         "<output_path> <shader_output_path> [options]\n";
+            return 0;
+        }
+        SynTools::AssetBuilder builder{ scl::path(argv[2]),
+                                        scl::path(argv[3]),
+                                        scl::path(argv[4]) };
+        if (!builder.BuildAssets()) {
+            std::cerr << "Asset build failed." << std::endl;
+            return 1;
+        }
+        std::cout << "Assets built successfully." << std::endl;
     } else {
         printHelp();
         return 1;

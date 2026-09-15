@@ -36,7 +36,10 @@ bool ShaderCompiler::CompileShader(std::string                     fragmentPath,
     std::string varying      = fragmentPath + ".vary";
     std::string srcExtension = ".sc";
     std::string outExtension = ".bin";
-    std::string includes = "-i ../../engine/third_party/bgfx.cmake/bgfx/src/";
+    std::string includes     = "";
+
+    bool overrideIncludes = false;
+
     // Frankly, I don't care about code cleanliness here - this is a tool (A bit
     // like myself, but anyway...)
     for (const auto& option : options) {
@@ -57,7 +60,17 @@ bool ShaderCompiler::CompileShader(std::string                     fragmentPath,
             includes += " -i " + option.substr(10);
         } else if (option.rfind("--vulkan", 0) == 0) {
             platform = "spirv";
+        } else if (option.rfind("--no-default-include", 0) == 0) {
+            overrideIncludes = true;
         }
+    }
+
+    // Syntools will typically be run from the editor, which may not be
+    // distributed with a Syngine installation in this directory. In this case,
+    // the editor will be able to provide the correct include paths, so we only
+    // add the default include path if not overridden.
+    if (!overrideIncludes) {
+        includes += "-i ../../engine/third_party/bgfx.cmake/bgfx/src/";
     }
 
     // Ensure srcDir ends with a slash
@@ -128,6 +141,8 @@ void ShaderCompiler::PrintHelp() {
     std::cout << "  --include=<dir>       Additional include directory, "
                  "relative to program "
                  "(Multiple allowed)\n";
+    std::cout
+        << "  --no-default-include  Do not use the default include paths\n";
     std::cout << "\nExamples:\n";
     std::cout << "syntools shader space s s\n";
     std::cout
