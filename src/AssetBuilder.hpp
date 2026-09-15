@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <cstdint> // for scl
 
 #include "../lib/miniscl.hpp"
 
