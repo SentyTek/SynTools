@@ -168,8 +168,8 @@ bool AssetPackager::CreateFileBundle(const std::vector<std::string>& files,
 
     for (auto i : result) {
         if (!i) {
-            std::cout << "Package input produced a null index: " << output.cstr()
-                      << std::endl;
+            std::cout << "Package input produced a null index: "
+                      << output.cstr() << std::endl;
             pack.close();
             return false;
         }
@@ -233,8 +233,26 @@ bool AssetPackager::PackTree(const std::string&              rootDir,
             std::string subOutput = (outDir / (name + ".spk")).string();
             std::cout << "pack-tree: bundling subdirectory '" << name << "' -> "
                       << subOutput << std::endl;
+
+            std::vector<std::string> subdirFiles;
+            for (const auto& fileEntry :
+                 fs::recursive_directory_iterator(dirEntry.path())) {
+                if (!fileEntry.is_regular_file()) {
+                    continue;
+                }
+                subdirFiles.push_back(
+                    fs::relative(fileEntry.path(), dirEntry.path())
+                        .generic_string());
+            }
+
+            if (subdirFiles.empty()) {
+                std::cout << "pack-tree: no files found under "
+                          << dirEntry.path().string() << std::endl;
+                continue;
+            }
+
             if (!CreateFileBundle(
-                    { "." },
+                    subdirFiles,
                     subOutput,
                     "",
                     { "--src-dir=" + dirEntry.path().string() })) {
