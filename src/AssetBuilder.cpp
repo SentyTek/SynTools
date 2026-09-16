@@ -11,6 +11,7 @@
 #include "ShaderCompiler.hpp"
 #include "ShaderMeta.hpp"
 
+#include <filesystem>
 #include <iostream>
 #include <unordered_map>
 
@@ -50,6 +51,12 @@ scl::path GroupFor(const scl::path& sourcePath,
         return scl::path("assets_root");
     }
     return relativeDir.split().front();
+}
+
+bool CreateDirectories(const scl::path& directory) {
+    std::error_code error;
+    std::filesystem::create_directories(directory.cstr(), error);
+    return !error;
 }
 
 } // namespace
@@ -140,6 +147,9 @@ bool ShaderBuilder::BuildShaders() {
     if (!sourcePath.isdirectory()) {
         return true;
     }
+    if (!CreateDirectories(outputPath)) {
+        return false;
+    }
 
     CleanUp();
     DiscoverShaderPairs();
@@ -206,11 +216,11 @@ bool ShaderBuilder::CompileShaderPairs() {
                 relativeBase.erase(0, prefix.size());
             }
         }
-        const scl::path outputBase =
-            outputPath + "/" + group + "/" + relativeBase;
+        const scl::path outputBase = group == ""
+                                         ? outputPath + "/" + relativeBase
+                                         : outputPath + "/" + group + "/" + relativeBase;
 
-        if (!outputBase.parentpath().isdirectory() &&
-            !scl::path::mkdir(outputBase.parentpath())) {
+        if (!CreateDirectories(outputBase.parentpath())) {
             return false;
         }
         std::vector<std::string> options{
@@ -243,7 +253,7 @@ bool ShaderBuilder::GenerateGroupMetadata() {
     }
 
     for (const auto& [group, directory] : groups) {
-        if (!directory.isdirectory() && !scl::path::mkdir(directory)) {
+        if (!CreateDirectories(directory)) {
             return false;
         }
         const scl::path source = singleBundle || group.empty() ||
@@ -277,7 +287,7 @@ bool ShaderBuilder::PackageGroups() {
     }
 
     AssetPackager packager;
-    if (!bundlePath.isdirectory() && !scl::path::mkdir(bundlePath)) {
+    if (!CreateDirectories(bundlePath)) {
         return false;
     }
     for (const auto& [group, entries] : files) {
