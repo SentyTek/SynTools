@@ -70,6 +70,9 @@ bool AssetPackager::CreateFileBundle(const std::vector<std::string>& files,
     }
 
     for (const std::string& file : files) {
+        // Skip macOS metadata files
+        if (file == ".DS_Store") continue;
+
         std::cout << "Processing file: " << file << std::endl;
         scl::path finalPath(file.c_str());
 

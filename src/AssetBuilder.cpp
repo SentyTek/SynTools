@@ -216,9 +216,9 @@ bool ShaderBuilder::CompileShaderPairs() {
                 relativeBase.erase(0, prefix.size());
             }
         }
-        const scl::path outputBase = group == ""
-                                         ? outputPath + "/" + relativeBase
-                                         : outputPath + "/" + group + "/" + relativeBase;
+        const scl::path outputBase =
+            group == "" ? outputPath + "/" + relativeBase
+                        : outputPath + "/" + group + "/" + relativeBase;
 
         if (!CreateDirectories(outputBase.parentpath())) {
             return false;
@@ -256,10 +256,10 @@ bool ShaderBuilder::GenerateGroupMetadata() {
         if (!CreateDirectories(directory)) {
             return false;
         }
-        const scl::path source = singleBundle || group.empty() ||
-                         group == "assets_root"
-                                     ? sourcePath
-                                     : sourcePath + "/" + group;
+        const scl::path source =
+            singleBundle || group.empty() || group == "assets_root"
+                ? sourcePath
+                : sourcePath + "/" + group;
         if (!ShaderMeta::GenerateShaderMeta(
                 source.cstr(),
                 { "--output=" + std::string(directory.cstr()) })) {
