@@ -29,6 +29,7 @@ void printHelp() {
     std::cout << "  shadermeta | sm    Generate shader metadata for an entire "
                  "shader directory. Generates one meta.xml for the entire "
                  "directory, containing all shaders.\n";
+    std::cout << "  view | v            View asset bundle contents\n";
     std::cout << "\nOptions:\n";
     std::cout << "  --help, -h          Show this help message\n";
     std::cout << "  --version, -v       Show tool version\n";
