@@ -21,8 +21,16 @@ class AssetPackager {
                           const std::string&              execPath = "",
                           const std::vector<std::string>& options  = {});
 
-    void PrintHelp();
+    void PrintHelpPack();
+    void PrintHelpTree();
+    void PrintHelpShaders();
 
     void ValidatePackage(const std::string& packagePath);
+
+    void ViewAsset(const std::string& assetPath, const std::string& asset);
+
+    bool PackTree(const std::string&              rootDir,
+                  const std::string&              outputPath,
+                  const std::vector<std::string>& options = {});
 };
 }; // namespace SynTools
